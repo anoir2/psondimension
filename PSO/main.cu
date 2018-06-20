@@ -245,7 +245,7 @@ float init_system(ParticleSystem *ps, int n, int nDim)
 {
 	ps->num_particles = n;
 	/* Allocate array of particles */
-	ps->particle = malloc(n*sizeof(Particle));
+	ps->particle = (Particle*)malloc(n*sizeof(Particle));
 	/* Compute the current fitness and best position */
 	int i_min = 0;
 	float fitness_min = HUGE_VALF;
