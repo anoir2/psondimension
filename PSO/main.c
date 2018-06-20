@@ -33,6 +33,7 @@
 #include <stdint.h>
 #define DIM 2
 
+
 /* Random number generation: we use the MWC64X PRNG from
  * http://cas.ee.ic.ac.uk/people/dt10/research/rngs-gpu-mwc64x.html
  * which is parallel-friendly (but needs us to keep track of the state)
@@ -61,10 +62,11 @@ void init_rand(uint64_t *prng_state, int i)
 }
 
 /* A vector in 2-dimensional space */
-//typedef struct float2
-//{
-//	float dim[DIM];
-//} float2;
+typedef struct floatN
+{
+	int n;
+	float dim[DIM];
+} floatN;
 
 /* Extents of the domain in each dimension */
 static const float coord_min = -1;
@@ -74,9 +76,9 @@ static const float coord_range = 2; // coord_max - coord_min, but the expression
 /* A particle */
 typedef struct Particle
 {
-	float *pos; /* particle position */
-	float *vel; /* particle velocity */
-	float *best_pos; /* best position so far */
+	floatN pos; /* particle position */
+	floatN vel; /* particle velocity */
+	floatN best_pos; /* best position so far */
 	float best_fit; /* fitness value of the best position so far */
 	float fitness; /* fitness value of the current position */
 	uint64_t prng_state; /* state of the PRNG for this particle */
@@ -86,54 +88,52 @@ typedef struct Particle
 typedef struct ParticleSystem
 {
 	Particle *particle; /* array of particles */
-	float *current_best_pos; /* best position in the whole system a this iteration */
-	float *global_best_pos; /* best position in the whole system so far */
+	floatN current_best_pos; /* best position in the whole system a this iteration */
+	floatN global_best_pos; /* best position in the whole system so far */
 	int num_particles; /* number of particles */
 	float global_fitness; /* fitness value for global_best_pos */
 	float current_fitness; /* fitness value for global_best_pos */
 } ParticleSystem;
 
 /* The target position */
-float *target_pos;
+floatN target_pos;
 
 /* Target function to be minimized: this is the square
  * Euclidean distance from target_pos, “perturbed” by the distance
  * to the origin: this puts a local minimum at the origin,
  * which is good to test if the method actually finds the global
  * minimum or not */
-float fitness(const float **pos)
+float fitness(const floatN *pos)
 {
-	float dim_vect[DIM];
-	int i;
-	for(i = 0; i < DIM; i++){
-		dim_vect[i] = pos[0][i] - target_pos[i];
-	}
 
+	float* dim_vect = (float*)malloc(sizeof(float)*pos->n);
+	int i;
+	float fit1 = 0,fit2 = 0;
+	for(i = 0; i < pos->n; i++){
+		dim_vect[i] = pos->dim[i] - target_pos.dim[i];
+	}
 	/* Euclidean square distance to the target position:
 	 * sum of the squares of the differences
 	 * of corresponding coordinates */
-	float fit1 = 0;
 
-	for(i = 0; i < DIM; i++){
+	for(i = 0; i < pos->n; i++){
 		fit1 = fit1 + (dim_vect[i]*dim_vect[i]);
 	}
 	/* Euclidean square distance to the origin:
 	 * sum of the squares of the coordinates */
-	float fit2 = 0;
-	for(i = 0; i < DIM; i++){
-		fit2 = fit2 + (pos[0][i]*pos[0][i]);
+	for(i = 0; i < pos->n; i++){
+		fit2 = fit2 + (pos->dim[i]*pos->dim[i]);
 	}
 	return fit1*(100*fit2+1)/10;
 }
 
 /* Function to initialize a single particle at index i.
  * Returns fitness of initial position. */
-float init_particle(Particle *p, int i)
+float init_particle(Particle *p, int i, int nDim)
 {
 	uint64_t prng_state;
 	init_rand(&prng_state, i);
-	float *pos = (float*)malloc(sizeof(float)*DIM);
-	float *vel = (float*)malloc(sizeof(float)*DIM);
+	floatN pos,vel;
 	int j;
 	/* we initialize each component of the position
 	 * to a random number between coord_min and coord_max,
@@ -141,20 +141,20 @@ float init_particle(Particle *p, int i)
 	 * between -coord_range and coord_range.
 	 * The initial position is also the current best_pos,
 	 * for which we also compute the fitness */
+	pos.dim[0] = range_rand(coord_min, coord_max, &prng_state);
+	pos.dim[1] = range_rand(coord_min, coord_max, &prng_state);
 
-	for (j = 0; j < DIM; j++){
-		pos[j] = range_rand(coord_min, coord_max, &prng_state);
+	for (j = 0; j < nDim; j++){
+		vel.dim[j] = range_rand(-coord_range, coord_range, &prng_state);
 	}
-
-	for (j = 0; j < DIM; j++){
-		vel[j] = range_rand(-coord_range, coord_range, &prng_state);
-	}
+	pos.n = vel.n = nDim;
 	p->pos = pos;
 	p->vel = vel;
 	p->best_pos = pos;
 	p->best_fit = p->fitness = fitness(&pos);
 	p->prng_state = prng_state;
 	return p->fitness;
+
 }
 
 /* Overall weight for the old velocity, best position distance and global
@@ -175,29 +175,31 @@ void new_vel(Particle *p, const ParticleSystem *ps)
 
 	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
-	const float *pos = p->pos;
+	const floatN pos = p->pos;
 	int i = 0;
 
-	const float *vel = p->vel;
-	float *nvel = (float*)malloc(sizeof(float)*DIM);
-
 	// best pos - pos
-	float *pbest = p->best_pos;
-	// global best post - pos
-	float *gbest = ps->global_best_pos;
+	floatN pbest = p->best_pos;
 
-	//FIXME: controllare se è ottimizzabile accorpandolo al for sotto
-	for(i = 0; i<DIM;i++){
-		pbest[i] -= pos[i];
-		gbest[i] -= pos[i];
+	// global best post - pos
+	floatN gbest = ps->global_best_pos;
+
+	for(i = 0; i<p->pos.n;i++){
+		pbest.dim[i] -=  pos.dim[i];
+		gbest.dim[i] -= pos.dim[i];
 	}
 
-	for(i = 0; i<DIM;i++){
-		nvel[i] = vel_omega*vel[i] + best_vec_rand_coeff*vel_phi_best*pbest[i] +
-				  global_vec_rand_coeff*vel_phi_global*gbest[i];
+	const floatN vel = p->vel;
 
-		if(nvel[i] > coord_range) nvel[i] = coord_range;
-		else if (nvel[i] < -coord_range) nvel[i] = -coord_range;
+	floatN nvel;
+	nvel.n = p->pos.n;
+
+	for(i = 0; i < p->pos.n;i++){
+		nvel.dim[i] = vel_omega*vel.dim[i] + best_vec_rand_coeff*vel_phi_best*pbest.dim[i] +
+				  global_vec_rand_coeff*vel_phi_global*gbest.dim[i];
+
+		if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
+		else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
 	}
 
 	p->vel = nvel;
@@ -216,14 +218,14 @@ const float step_factor = 1;
 float new_pos(Particle *p)
 {
 	/* Update the position, clamping at the domain boundaries */
-	const float *vel = p->vel;
-	float *pos = p->pos;
+	const floatN vel = p->vel;
+	floatN pos = p->pos;
 	int i;
 
-	for(i = 0; i < DIM; i++){
-		pos[i] += step_factor*vel[i];
-		if (pos[i] > coord_max) pos[i] = coord_max;
-		else if (pos[i] < coord_min) pos[i] = coord_min;
+	for(i = 0; i < pos.n; i++){
+		pos.dim[i] += step_factor*vel.dim[i];
+		if (pos.dim[i] > coord_max) pos.dim[i] = coord_max;
+		else if (pos.dim[i] < coord_min) pos.dim[i] = coord_min;
 	}
 
 	p->pos = pos;
@@ -239,7 +241,7 @@ float new_pos(Particle *p)
 
 /* Function to initialize a particle system with n particles.
  * Returns the best global fitness. */
-float init_system(ParticleSystem *ps, int n)
+float init_system(ParticleSystem *ps, int n, int nDim)
 {
 	ps->num_particles = n;
 	/* Allocate array of particles */
@@ -249,7 +251,7 @@ float init_system(ParticleSystem *ps, int n)
 	float fitness_min = HUGE_VALF;
 	for (int i = 0; i < n; ++i) {
 		/* initialize the i-th particle */
-		float fitness = init_particle(ps->particle + i, i);
+		float fitness = init_particle(ps->particle + i, i,nDim);
 		/* use its position as global best position if the fitness is
 		 * less than the current global fitness */
 		if (fitness < fitness_min) {
@@ -302,33 +304,43 @@ int main(int argc, char *argv[])
 {
 	ParticleSystem ps;
 	unsigned step = 0;
+
 	int j;
-	target_pos = (float*)malloc(DIM*sizeof(float));
-
-#define MAX_STEPS (1<<20) /* run for no more than 1Mi steps */
-#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
-#define STEP_CHECK_FREQ 100 /* after how many steps to write the system and check the time */
-
-	/* Initialize the target position */
-	uint64_t prng_state;
-	init_rand(&prng_state, time(NULL));
+//#define MAX_STEPS (1<<20) /* run for no more than 1Mi steps */
+//#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
+//#define STEP_CHECK_FREQ 100 /* after how many steps to write the system and check the time */
+//	int dimensions = DIM;
+//	/* Initialize the target position */
+//	uint64_t prng_state;
+//	init_rand(&prng_state, time(NULL));
+//	target_pos.n = dimensions;
 //	printf("target position: (");
-//	for(j = 0; j < DIM; j++){
-//		target_pos[j] = range_rand(coord_min, coord_max, &prng_state);
-//		printf("%g,", target_pos[j]);
+//	for(j = 0; j < target_pos.n; j++){
+//		target_pos.dim[j] = range_rand(coord_min, coord_max, &prng_state);
+//		printf("%g,", target_pos.dim[j]);
 //	}
-//
 //	printf(")\n");
+	#define MAX_STEPS (200) /* run for no more than 1Mi steps */
+	#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
+	#define STEP_CHECK_FREQ 1 /* after how many steps to write the system and check the time */
+	int dimensions = DIM;
+		/* Initialize the target position */
+		uint64_t prng_state;
+		init_rand(&prng_state, time(NULL));
+	//	target_pos.x = range_rand(coord_min, coord_max, &prng_state);
+	//	target_pos.y = range_rand(coord_min, coord_max, &prng_state);
+		target_pos.n = dimensions;
 
-	// -0.287776,0.520416
-	target_pos[0] = -0.287776;
-	target_pos[1] = 0.520416;
+		target_pos.n = dimensions;
+		target_pos.dim[0] = -0.287776;
+		target_pos.dim[1] = 0.520416;
+
 
 	/* Initialize a system with the number of particles given
 	 * on the command-line, defaulting to something which is
 	 * related to the number of dimensions */
 	init_system(&ps,
-		argc > 1 ? atoi(argv[1]) : 128);
+		argc > 1 ? atoi(argv[1]) : 128, dimensions);
 
 	write_system(&ps, step);
 
@@ -348,8 +360,8 @@ void write_csv(const ParticleSystem *ps, int step)
 {
 #define FNSZ 1024 /* maximum size for the file name */
 	char fname[FNSZ+1];
-	int i,j;
 	fname[FNSZ] = '\0';
+	int j;
 	snprintf(fname, FNSZ, "pso.%u.csv", step);
 
 	FILE *fp = fopen(fname, "w");
@@ -359,50 +371,47 @@ void write_csv(const ParticleSystem *ps, int step)
 	}
 
 	/* Write header */
-	fprintf(fp, "x,y,vx,vy,current_fitness,bx,by,best_fit\n");
+	fprintf(fp, "x,y,vx,vy,current_fitness,bx,by,best_fit");
 
 	/* Write out each particle */
-	float *vec;
-	for (i = 0; i < ps->num_particles; ++i)
+	floatN vec;
+	for (int i = 0; i < ps->num_particles; ++i)
 	{
 		const Particle *p = ps->particle + i;
 
 		vec = p->pos;
-		for(j = 0; j < DIM; j++){
-			fprintf(fp, "%g,", vec[j]);
+		for(j = 0; j < vec.n; j++){
+			fprintf(fp, "%g,", vec.dim[j]);
 		}
 
 		vec = p->vel;
-		for(j = 0; j < DIM; j++){
-			fprintf(fp, "%g,", vec[j]);
+		for(j = 0; j < vec.n; j++){
+			fprintf(fp, "%g,", vec.dim[j]);
 		}
 
 		fprintf(fp, "%g,", p->fitness);
 
 		vec = p->best_pos;
-		for(j = 0; j < DIM; j++){
-			fprintf(fp, "%g,", vec[j]);
+		for(j = 0; j < vec.n; j++){
+			fprintf(fp, "%g,", vec.dim[j]);
 		}
 
 		fprintf(fp, "%g\n", p->best_fit);
 	}
 
-
 	/* Write out the target point */
 	vec = target_pos;
-	for(j = 0; j < DIM; j++){
-		fprintf(fp, "%g,", vec[j]);
-		vec[j] = 0;
+	for(j = 0; j < vec.n; j++){
+		fprintf(fp, "%g,", vec.dim[j]);
 	}
 
-	for(j = 0; j < DIM; j++){
-		fprintf(fp, "%g,", vec[j]);
-		vec[j] = 0;
+	for(j = 0; j < vec.n; j++){
+		fprintf(fp, "%g,", 0.0);
 	}
 	fprintf(fp, "%g,", 0.0); /* null fitness */
 	vec = target_pos;
-	for(j = 0; j < DIM; j++){
-		fprintf(fp, "%g,", vec[j]); /* best pos is the same as target pos */
+	for(j = 0; j < vec.n; j++){
+		fprintf(fp, "%g,", vec.dim[j]); /* best pos is the same as target pos */
 	}
 	fprintf(fp, "%g\n", 0.0); /* null best fit */
 
@@ -416,7 +425,6 @@ void write_system(const ParticleSystem *ps, int step)
 	/* structs used for timing */
 	static struct timespec start;
 	static struct timespec stop;
-	float *vec;
 	int j;
 
 	double runtime_ms;
@@ -435,26 +443,24 @@ void write_system(const ParticleSystem *ps, int step)
 			nsteps, runtime_ms, nsteps*1000/runtime_ms, ps->num_particles,
 			(nsteps*ps->num_particles)/runtime_ms/1000);
 	}
-	vec = target_pos;
-	printf("\ttarget ");
-	for(j = 0; j < DIM; j++){
-		printf("%g,", vec[j]);
 
+	printf("\ttarget ");
+	for(j = 0; j < target_pos.n; j++){
+		printf("%g,", target_pos.dim[j]);
 	}
-	vec = ps->current_best_pos;
+
 	printf("\n\tcurrent ");
-	for(j = 0; j < DIM; j++){
-		printf( "%g,", vec[j]);
+	for(j = 0; j < ps->current_best_pos.n; j++){
+		printf( "%g,", ps->current_best_pos.dim[j]);
 	}
-	vec = ps->global_best_pos;
 
 	printf("\n\tso far ");
-	for(j = 0; j < DIM; j++){
-		printf("%g,", vec[j]);
+	for(j = 0; j < ps->global_best_pos.n; j++){
+		printf("%g,", ps->global_best_pos.dim[j]);
 	}
 	printf("\n");
 
-	write_csv(ps, step);
+	//write_csv(ps, step);
 
 	last_step = step;
 	clock_gettime(CLOCK_MONOTONIC, &start);
