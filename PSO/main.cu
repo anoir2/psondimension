@@ -399,11 +399,6 @@ __global__ void new_vel(ParticleSystem *ps)
 	uint64_t prng_state = p.prng_state;
 	int i;
 
-	if(particleIndex == 13){
-		particleIndex = particleIndex +1-1;
-		printf("ciao");
-	}
-
 	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
 	const floatN pos = p.pos;
@@ -431,11 +426,6 @@ __global__ void new_vel(ParticleSystem *ps)
 
 		if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
 		else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
-	}
-
-	if(particleIndex == 13){
-		particleIndex = particleIndex +1-1;
-		printf("ciao");
 	}
 
 	ps->particle[particleIndex].vel = nvel;
