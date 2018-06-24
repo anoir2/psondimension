@@ -417,32 +417,24 @@ __global__ void new_vel(ParticleSystem *ps)
 
 		int i;
 		Particle *p = &ps->particle[particleIndex];
-		uint64_t prng_state = p->prng_state;
-		const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
-		const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
-		floatN pbest = p->best_pos;
-		floatN gbest = ps->global_best_pos;
-		floatN nvel;
+		int n_dim = p->pos.n;
+		const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+		const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+		float pbest;
+		float gbest;
+		floatN *nvel = &p->vel;
 
+		for(i = 0; i < n_dim;i++){
 
-		for(i = 0; i<p->pos.n;i++){
-			pbest.dim[i] -=  p->pos.dim[i];
-			gbest.dim[i] -= p->pos.dim[i];
+			pbest =  p->best_pos.dim[i] - p->pos.dim[i];
+			gbest = ps->global_best_pos.dim[i] - p->pos.dim[i];
+
+			nvel->dim[i] = vel_omega*nvel->dim[i] + best_vec_rand_coeff*vel_phi_best*pbest +
+					  global_vec_rand_coeff*vel_phi_global*gbest;
+
+			if(nvel->dim[i] > coord_range) nvel->dim[i] = coord_range;
+			else if (nvel->dim[i] < -coord_range) nvel->dim[i] = -coord_range;
 		}
-
-		nvel.n = p->pos.n;
-
-		for(i = 0; i < p->pos.n;i++){
-			nvel.dim[i] = vel_omega*p->vel.dim[i] + best_vec_rand_coeff*vel_phi_best*pbest.dim[i] +
-					  global_vec_rand_coeff*vel_phi_global*gbest.dim[i];
-
-			if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
-			else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
-		}
-
-		ps->particle[particleIndex].vel = nvel;
-		ps->particle[particleIndex].prng_state = prng_state;
-
 }
 
 /* Function to update the position (and possibly best position) of a given particle.
