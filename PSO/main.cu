@@ -75,16 +75,16 @@ __device__ floatN target_pos_shared;
 /* Overall weight for the old velocity, best position distance and global
  * best position distance in the computation of the new velocity
  */
-const float vel_omega = .9;
-const float vel_phi_best = 2;
-const float vel_phi_global = 2;
+__const__ float vel_omega = .9;
+__const__ float vel_phi_best = 2;
+__const__ float vel_phi_global = 2;
 
 /* The contribution of the velocity to the new position. Set to 1
  * to use the standard PSO approach of adding the whole velocity
  * to the position.
  * In my experience a smaller factor speeds up convergence
  */
-const float step_factor = 1;
+__const__ float step_factor = 1;
 
 __device__ __host__ uint32_t MWC64X(uint64_t *state);
 __device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
@@ -170,7 +170,7 @@ int main(int argc, char *argv[])
 		++step;
 
 		/* Compute the new velocity for each particle */
-		new_vel<<<n_particle, n_dimensions>>>(ps);
+		new_vel<<<n_particle, 1>>>(ps);
 
 		/* Update the position of each particle, and the global fitness */
 
@@ -397,8 +397,12 @@ __global__ void new_vel(ParticleSystem *ps)
 	int dimIndex = threadIdx.x;
 	Particle p = ps->particle[particleIndex];
 	uint64_t prng_state = p.prng_state;
+	int i;
 
-
+	if(particleIndex == 13){
+		particleIndex = particleIndex +1-1;
+		printf("ciao");
+	}
 
 	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
@@ -411,24 +415,31 @@ __global__ void new_vel(ParticleSystem *ps)
 	floatN gbest = ps->global_best_pos;
 
 
-	pbest.dim[dimIndex] -=  pos.dim[dimIndex];
-	gbest.dim[dimIndex] -= pos.dim[dimIndex];
-
+	for(i = 0; i<p.pos.n;i++){
+		pbest.dim[i] -=  pos.dim[i];
+		gbest.dim[i] -= pos.dim[i];
+	}
 
 	const floatN vel = p.vel;
 
 	floatN nvel;
 	nvel.n = p.pos.n;
 
-	nvel.dim[dimIndex] = vel_omega*vel.dim[dimIndex] + best_vec_rand_coeff*vel_phi_best*pbest.dim[dimIndex] +
-			  global_vec_rand_coeff*vel_phi_global*gbest.dim[dimIndex];
+	for(i = 0; i < p.pos.n;i++){
+		nvel.dim[i] = vel_omega*vel.dim[i] + best_vec_rand_coeff*vel_phi_best*pbest.dim[i] +
+				  global_vec_rand_coeff*vel_phi_global*gbest.dim[i];
 
-	if(nvel.dim[dimIndex] > coord_range) nvel.dim[dimIndex] = coord_range;
-	else if (nvel.dim[dimIndex] < -coord_range) nvel.dim[dimIndex] = -coord_range;
+		if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
+		else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
+	}
 
+	if(particleIndex == 13){
+		particleIndex = particleIndex +1-1;
+		printf("ciao");
+	}
 
-	p.vel = nvel;
-	p.prng_state = prng_state;
+	ps->particle[particleIndex].vel = nvel;
+	ps->particle[particleIndex].prng_state = prng_state;
 }
 
 /* Function to update the position (and possibly best position) of a given particle.
@@ -441,6 +452,9 @@ __global__ void new_pos(ParticleSystem *ps)
 	const floatN vel = p->vel;
 	floatN pos = p->pos;
 	int i;
+	if(particleIndex == 13){
+		particleIndex = particleIndex +11-11;
+	}
 
 	for(i = 0; i < pos.n; i++){
 		pos.dim[i] += step_factor*vel.dim[i];
@@ -498,9 +512,8 @@ __global__ void find_min_fitness(ParticleSystem *ps){
 }
 
 __global__ void find_min_fitness_v2(ParticleSystem *ps){
-	float fitness = 0;
 	float fitness_min = HUGE_VALF;
-	int i, i_min;
+	int i, i_min = 0;
 	for (i = 0; i < ps->num_particles; ++i) {
 		/* initialize the i-th particle */
 		//Particle p = ps.particle[0];
