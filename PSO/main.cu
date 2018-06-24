@@ -31,6 +31,7 @@
 #include <float.h>
 #include <errno.h>
 #include <stdint.h>
+#include <cuda_runtime_api.h>
 #define DIM 2
 
 /* A vector in 2-dimensional space */
@@ -97,7 +98,7 @@ __global__ void find_min_fitness(ParticleSystem *ps);
 __global__ void find_min_fitness_v2(ParticleSystem *ps);
 __global__ void new_vel(ParticleSystem *ps);
 __global__ void new_pos(ParticleSystem *ps);
-float step_system(ParticleSystem **psdb,int n_part, int n_dimensions);
+__global__ void new_pos_vel(ParticleSystem *ps);
 void write_system(ParticleSystem **ps, int step);
 void check_error(cudaError_t err, const char *msg)
 {
@@ -132,6 +133,8 @@ int main(int argc, char *argv[])
 	#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
 	#define STEP_CHECK_FREQ 1 /* after how many steps to write the system and check the time */
 	int n_dimensions = DIM;
+	int n_thread = 32;
+	int n_blocks = n_particle / n_thread;
 		/* Initialize the target position */
 		uint64_t prng_state;
 		init_rand(&prng_state, time(NULL));
@@ -148,6 +151,7 @@ int main(int argc, char *argv[])
 	 * on the command-line, defaulting to something which is
 	 * related to the number of dimensions */
 
+
 	cudaMalloc(&ps,sizeof(ParticleSystem));
 	init_cuda_system<<<1,1>>>(ps, n_particle,n_dimensions);
 	//init_system(&ps,n_particle, dimensions);
@@ -156,6 +160,7 @@ int main(int argc, char *argv[])
 	//Particle* hostPointer = (Particle*)malloc(n_particle*sizeof(Particle));
 	//cudaMalloc(&devicePointer,sizeof(Particle) * n_particle);
 	/* Compute the current fitness and best position */
+
 	init_particle<<< n_particle ,1 >>>(ps);
 	find_min_fitness<<< n_particle,1 >>>(ps);
 
@@ -170,19 +175,37 @@ int main(int argc, char *argv[])
 		++step;
 
 		/* Compute the new velocity for each particle */
-		new_vel<<<n_particle, 1>>>(ps);
+
+		cudaEvent_t before_init_particle, after_init_particle;
+		cudaEventCreate(&before_init_particle);
+		cudaEventCreate(&after_init_particle);
+		cudaEventRecord(before_init_particle);
+		new_vel<<<n_blocks, n_thread>>>(ps);
+		cudaEventRecord(after_init_particle);
+		cudaEventSynchronize(after_init_particle);
+		float runtime;
+		cudaEventElapsedTime(&runtime, before_init_particle, after_init_particle);
+		printf("step %d new_vel tempo %f\n",step, runtime);
+
 
 		/* Update the position of each particle, and the global fitness */
-
+		cudaEventCreate(&before_init_particle);
+		cudaEventCreate(&after_init_particle);
+		cudaEventRecord(before_init_particle);
 		new_pos<<<n_particle,1>>>(ps);
+		cudaEventRecord(after_init_particle);
+		cudaEventSynchronize(after_init_particle);
+		cudaEventElapsedTime(&runtime, before_init_particle, after_init_particle);
+		printf("step %d new_pos tempo %f\n",step, runtime);
+		//new_pos_vel<<<n_particle, 1>>>(ps);
 		find_min_fitness_v2<<<1,1>>>(ps);
 	    cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost);
 	    float fitness_min = psHost->current_fitness;
 		if (fitness_min < TARGET_FITNESS)
 			break;
-		if (step % STEP_CHECK_FREQ == 0) {
-			write_system(&psHost, step);
-		}
+//		if (step % STEP_CHECK_FREQ == 0) {
+//			write_system(&psHost, step);
+//		}
 	}
 	write_system(&psHost, step);
 }
@@ -388,48 +411,38 @@ __global__ void init_particle(ParticleSystem *ps)
 /* Function to compute the new velocity of a given particle */
 __global__ void new_vel(ParticleSystem *ps)
 {
-	/* Each velocity component gets updated by a randomly
-	 * weighted factor given by the distance from the best
-	 * particle position and a randomly weighted factor given
-	 * by the distance from the global best position.
-	 */
-	int particleIndex = blockIdx.x;
-	int dimIndex = threadIdx.x;
-	Particle p = ps->particle[particleIndex];
-	uint64_t prng_state = p.prng_state;
-	int i;
+		int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+		if(particleIndex >= ps->num_particles)
+			return;
 
-	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
-	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
-	const floatN pos = p.pos;
-
-	// best pos - pos
-	floatN pbest = p.best_pos;
-
-	// global best post - pos
-	floatN gbest = ps->global_best_pos;
+		int i;
+		Particle *p = &ps->particle[particleIndex];
+		uint64_t prng_state = p->prng_state;
+		const float best_vec_rand_coeff = range_rand(0, 1, &prng_state);
+		const float global_vec_rand_coeff = range_rand(0, 1, &prng_state);
+		floatN pbest = p->best_pos;
+		floatN gbest = ps->global_best_pos;
+		floatN nvel;
 
 
-	for(i = 0; i<p.pos.n;i++){
-		pbest.dim[i] -=  pos.dim[i];
-		gbest.dim[i] -= pos.dim[i];
-	}
+		for(i = 0; i<p->pos.n;i++){
+			pbest.dim[i] -=  p->pos.dim[i];
+			gbest.dim[i] -= p->pos.dim[i];
+		}
 
-	const floatN vel = p.vel;
+		nvel.n = p->pos.n;
 
-	floatN nvel;
-	nvel.n = p.pos.n;
+		for(i = 0; i < p->pos.n;i++){
+			nvel.dim[i] = vel_omega*p->vel.dim[i] + best_vec_rand_coeff*vel_phi_best*pbest.dim[i] +
+					  global_vec_rand_coeff*vel_phi_global*gbest.dim[i];
 
-	for(i = 0; i < p.pos.n;i++){
-		nvel.dim[i] = vel_omega*vel.dim[i] + best_vec_rand_coeff*vel_phi_best*pbest.dim[i] +
-				  global_vec_rand_coeff*vel_phi_global*gbest.dim[i];
+			if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
+			else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
+		}
 
-		if(nvel.dim[i] > coord_range) nvel.dim[i] = coord_range;
-		else if (nvel.dim[i] < -coord_range) nvel.dim[i] = -coord_range;
-	}
+		ps->particle[particleIndex].vel = nvel;
+		ps->particle[particleIndex].prng_state = prng_state;
 
-	ps->particle[particleIndex].vel = nvel;
-	ps->particle[particleIndex].prng_state = prng_state;
 }
 
 /* Function to update the position (and possibly best position) of a given particle.
@@ -442,9 +455,6 @@ __global__ void new_pos(ParticleSystem *ps)
 	const floatN vel = p->vel;
 	floatN pos = p->pos;
 	int i;
-	if(particleIndex == 13){
-		particleIndex = particleIndex +11-11;
-	}
 
 	for(i = 0; i < pos.n; i++){
 		pos.dim[i] += step_factor*vel.dim[i];
@@ -460,18 +470,6 @@ __global__ void new_pos(ParticleSystem *ps)
 		p->best_fit = p->fitness;
 		p->best_pos = pos;
 	}
-}
-
-/* Function to step the particle system.
- * Returns the current global fitness. */
-float step_system(ParticleSystem **psdb,int n_part, int n_dimensions)
-{
-	//ParticleSystem *ps = (*psdb);
-
-
-	//return fitness_min;
-
-	return 0.0;
 }
 
 __global__ void init_cuda_system(ParticleSystem *ps, int n_particle, int dim_n){
