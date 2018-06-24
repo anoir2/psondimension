@@ -66,7 +66,7 @@ typedef struct ParticleSystem
 static const float coord_min = -1;
 static const float coord_max = 1;
 static const float coord_range = 2; // coord_max - coord_min, but the expression is not const in C 8-/
-floatN target_pos;	/* The target position */
+__shared__ floatN target_pos;	/* The target position */
 
 /* Overall weight for the old velocity, best position distance and global
  * best position distance in the computation of the new velocity
@@ -82,20 +82,27 @@ const float vel_phi_global = 2;
  */
 const float step_factor = 1;
 
-uint32_t MWC64X(uint64_t *state);
-float range_rand(float min, float max, uint64_t *prng_state);
-void init_rand(uint64_t *prng_state, int i);
-float fitness(const floatN *pos);
-float init_particle(Particle *p, int i, int nDim);
+__device__ __host__ uint32_t MWC64X(uint64_t *state);
+__device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
+__device__ __host__ void init_rand(uint64_t *prng_state, int i);
+__device__ __host__ float fitness(const floatN *pos);
+__global__ void init_particle(Particle *p, int nDim);
 void new_vel(Particle *p, const ParticleSystem *ps);
 float new_pos(Particle *p);
-float init_system(ParticleSystem *ps, int n, int nDim);
-float step_system(ParticleSystem *ps);
-void write_system(const ParticleSystem* ps, int step);
-
+float init_system(ParticleSystem **ps, int n, int nDim);
+float step_system(ParticleSystem **ps);
+void write_system(ParticleSystem **ps, int step);
+void check_error(cudaError_t err, const char *msg)
+{
+  if (err != cudaSuccess) {
+    fprintf(stderr, "%s : errore %d (%s)\n",
+      msg, err, cudaGetErrorString(err));
+    exit(err);
+  }
+}
 int main(int argc, char *argv[])
 {
-	ParticleSystem ps;
+	ParticleSystem *ps;
 	unsigned step = 0;
 	int n_particle = argc > 1 ? atoi(argv[1]) : 128;
 
@@ -133,16 +140,24 @@ int main(int argc, char *argv[])
 	 * on the command-line, defaulting to something which is
 	 * related to the number of dimensions */
 
+	cudaMalloc(&ps,sizeof(ParticleSystem));
+	cudaMalloc(&ps->particle,sizeof(Particle) * n_particle);
 	//init_system(&ps,n_particle, dimensions);
-	ps.num_particles = n_particle;
+	//ps->num_particles = n_particle;
 	/* Allocate array of particles */
-	ps.particle = (Particle*)malloc(n_particle*sizeof(Particle));
+	Particle* hostPointer = (Particle*)malloc(n_particle*sizeof(Particle));
+	Particle* devicePointer;
+	cudaMalloc(&devicePointer,sizeof(Particle) * n_particle);
 	/* Compute the current fitness and best position */
+	init_particle<<< n_particle ,1 >>>(ps->particle,dimensions);
+	check_error(cudaMemcpy(hostPointer, devicePointer, sizeof(Particle) * n_particle, cudaMemcpyDeviceToHost),"copy blabla");
 	int i_min = 0;
+
 	float fitness_min = HUGE_VALF;
 	for (int i = 0; i < n_particle; ++i) {
 		/* initialize the i-th particle */
-		float fitness = init_particle(ps.particle + i, i,dimensions);
+		//Particle p = ps.particle[0];
+		float fitness = 0.0;
 		/* use its position as global best position if the fitness is
 		 * less than the current global fitness */
 		if (fitness < fitness_min) {
@@ -151,8 +166,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	ps.global_fitness = ps.current_fitness = fitness_min;
-	ps.global_best_pos = ps.current_best_pos = ps.particle[i_min].pos;
+	ps->global_fitness = ps->current_fitness = fitness_min;
+	ps->global_best_pos = ps->current_best_pos = ps->particle[i_min].pos;
 	// end init system
 
 
@@ -170,7 +185,7 @@ int main(int argc, char *argv[])
 	write_system(&ps, step);
 }
 
-void write_csv(const ParticleSystem *ps, int step)
+void write_csv(ParticleSystem *ps, int step)
 {
 #define FNSZ 1024 /* maximum size for the file name */
 	char fname[FNSZ+1];
@@ -233,7 +248,7 @@ void write_csv(const ParticleSystem *ps, int step)
 }
 
 /* Save the particle system to disk */
-void write_system(const ParticleSystem *ps, int step)
+void write_system(ParticleSystem **psdb, int step)
 {
 	/* Step at which we wrote last time */
 	static int last_step = 0;
@@ -241,6 +256,7 @@ void write_system(const ParticleSystem *ps, int step)
 	static struct timespec start;
 	static struct timespec stop;
 	int j;
+	ParticleSystem *ps = (*psdb);
 
 	double runtime_ms;
 	if (step > 0) {
@@ -331,26 +347,27 @@ uint32_t MWC64X(uint64_t *state)
 }
 
 /* A functio to initialize the PRNG */
-void init_rand(uint64_t *prng_state, int i)
+__device__ __host__ void init_rand(uint64_t *prng_state, int i)
 {
 	*prng_state = i;
 }
 
 /* Function to initialize a single particle at index i.
  * Returns fitness of initial position. */
-float init_particle(Particle *p, int i, int nDim)
+__global__ void init_particle(Particle *part,int nDim)
 {
 	uint64_t prng_state;
-	init_rand(&prng_state, i);
+	init_rand(&prng_state, blockDim.x);
 	floatN pos,vel;
 	int j;
+	Particle *p = &part[blockDim.x];
 	/* we initialize each component of the position
 	 * to a random number between coord_min and coord_max,
 	 * each component of the velocity to a random number
 	 * between -coord_range and coord_range.
 	 * The initial position is also the current best_pos,
 	 * for which we also compute the fitness */
-	pos.dim[0] = range_rand(coord_min, coord_max, &prng_state);
+	pos.dim[0] = 10;
 	pos.dim[1] = range_rand(coord_min, coord_max, &prng_state);
 
 	for (j = 0; j < nDim; j++){
@@ -362,8 +379,6 @@ float init_particle(Particle *p, int i, int nDim)
 	p->best_pos = pos;
 	p->best_fit = p->fitness = fitness(&pos);
 	p->prng_state = prng_state;
-	return p->fitness;
-
 }
 
 /* Function to compute the new velocity of a given particle */
@@ -435,17 +450,12 @@ float new_pos(Particle *p)
 	return fit;
 }
 
-/* Function to initialize a particle system with n particles.
- * Returns the best global fitness. */
-float init_system(ParticleSystem *ps, int n, int nDim)
-{
-
-}
-
 /* Function to step the particle system.
  * Returns the current global fitness. */
-float step_system(ParticleSystem *ps)
+float step_system(ParticleSystem **psdb)
 {
+	ParticleSystem *ps = (*psdb);
+
 	/* Compute the new velocity for each particle */
 	for (int i = 0; i < ps->num_particles; ++i) {
 		new_vel(ps->particle + i, ps);
