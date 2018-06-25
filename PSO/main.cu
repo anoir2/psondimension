@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
 		cudaEventCreate(&before_init_particle);
 		cudaEventCreate(&after_init_particle);
 		cudaEventRecord(before_init_particle);
-		new_pos<<<n_particle,1>>>(ps);
+		new_pos<<<n_blocks, n_thread>>>(ps);
 		cudaEventRecord(after_init_particle);
 		cudaEventSynchronize(after_init_particle);
 		cudaEventElapsedTime(&runtime, before_init_particle, after_init_particle);
@@ -329,24 +329,13 @@ void write_system(ParticleSystem **psdb, int step)
  * minimum or not */
 __device__ float fitness(const floatN *pos)
 {
-
-	float* dim_vect = (float*)malloc(sizeof(float)*pos->n);
 	int i;
-	float fit1 = 0,fit2 = 0;
+	float fit1 = 0,fit2 = 0, dim_val;
 	for(i = 0; i < pos->n; i++){
-		dim_vect[i] = pos->dim[i] - target_pos_shared.dim[i];
-	}
-	/* Euclidean square distance to the target position:
-	 * sum of the squares of the differences
-	 * of corresponding coordinates */
+		dim_val = pos->dim[i];
 
-	for(i = 0; i < pos->n; i++){
-		fit1 = fit1 + (dim_vect[i]*dim_vect[i]);
-	}
-	/* Euclidean square distance to the origin:
-	 * sum of the squares of the coordinates */
-	for(i = 0; i < pos->n; i++){
-		fit2 = fit2 + (pos->dim[i]*pos->dim[i]);
+		fit1 += pow(dim_val - target_pos_shared.dim[i],2);
+		fit2 += pow(dim_val,2);
 	}
 	return fit1*(100*fit2+1)/10;
 }
@@ -437,30 +426,26 @@ __global__ void new_vel(ParticleSystem *ps)
 		}
 }
 
-/* Function to update the position (and possibly best position) of a given particle.
- * Returns the fitness of the new position. */
 __global__ void new_pos(ParticleSystem *ps)
 {
-	/* Update the position, clamping at the domain boundaries */
-	int particleIndex = blockIdx.x;
-	Particle *p = ps->particle + particleIndex;
-	const floatN vel = p->vel;
-	floatN pos = p->pos;
+	int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	if(particleIndex >= ps->num_particles)
+		return;
+	Particle *p = &ps->particle[particleIndex];
 	int i;
 
-	for(i = 0; i < pos.n; i++){
-		pos.dim[i] += step_factor*vel.dim[i];
-		if (pos.dim[i] > coord_max) pos.dim[i] = coord_max;
-		else if (pos.dim[i] < coord_min) pos.dim[i] = coord_min;
+	for(i = 0; i < p->pos.n; i++){
+		p->pos.dim[i] += step_factor*p->vel.dim[i];
+		if (p->pos.dim[i] > coord_max) p->pos.dim[i] = coord_max;
+		else if (p->pos.dim[i] < coord_min) p->pos.dim[i] = coord_min;
 	}
 
-	p->pos = pos;
 
 	/* Compute the new fitness */
-	const float fit = p->fitness = fitness(&pos);
+	const float fit = p->fitness = fitness(&p->pos);
 	if (fit < p->best_fit) {
 		p->best_fit = p->fitness;
-		p->best_pos = pos;
+		p->best_pos = p->pos;
 	}
 }
 
