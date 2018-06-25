@@ -134,7 +134,8 @@ int main(int argc, char *argv[])
 	#define STEP_CHECK_FREQ 1 /* after how many steps to write the system and check the time */
 	int n_dimensions = DIM;
 	int n_thread = 32;
-	int n_blocks = n_particle / n_thread;
+	int n_blocks = (n_particle / n_thread) + n_particle%n_thread;
+	dim3 block_thread(n_thread,n_dimensions,1);
 		/* Initialize the target position */
 		uint64_t prng_state;
 		init_rand(&prng_state, time(NULL));
@@ -180,7 +181,7 @@ int main(int argc, char *argv[])
 		cudaEventCreate(&before_init_particle);
 		cudaEventCreate(&after_init_particle);
 		cudaEventRecord(before_init_particle);
-		new_vel<<<n_blocks, n_thread>>>(ps);
+		new_vel<<<n_blocks, block_thread>>>(ps);
 		cudaEventRecord(after_init_particle);
 		cudaEventSynchronize(after_init_particle);
 		float runtime;
@@ -395,30 +396,25 @@ __global__ void init_particle(ParticleSystem *ps)
 /* Function to compute the new velocity of a given particle */
 __global__ void new_vel(ParticleSystem *ps)
 {
-		int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+		int particleIndex = (blockIdx.x * blockDim.x + threadIdx.x);
 		if(particleIndex >= ps->num_particles)
 			return;
 
-		int i;
+		int dim = threadIdx.y;
 		Particle *p = &ps->particle[particleIndex];
-		int n_dim = p->pos.n;
+		floatN *nvel = &p->vel;
 		const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 		const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
-		float pbest;
-		float gbest;
-		floatN *nvel = &p->vel;
 
-		for(i = 0; i < n_dim;i++){
+		float pbest =  p->best_pos.dim[dim] - p->pos.dim[dim];
+		float gbest = ps->global_best_pos.dim[dim] - p->pos.dim[dim];
 
-			pbest =  p->best_pos.dim[i] - p->pos.dim[i];
-			gbest = ps->global_best_pos.dim[i] - p->pos.dim[i];
+		nvel->dim[dim] = vel_omega*nvel->dim[dim] + best_vec_rand_coeff*vel_phi_best*pbest +
+				  global_vec_rand_coeff*vel_phi_global*gbest;
 
-			nvel->dim[i] = vel_omega*nvel->dim[i] + best_vec_rand_coeff*vel_phi_best*pbest +
-					  global_vec_rand_coeff*vel_phi_global*gbest;
+		if(nvel->dim[dim] > coord_range) nvel->dim[dim] = coord_range;
+		else if (nvel->dim[dim] < -coord_range) nvel->dim[dim] = -coord_range;
 
-			if(nvel->dim[i] > coord_range) nvel->dim[i] = coord_range;
-			else if (nvel->dim[i] < -coord_range) nvel->dim[i] = -coord_range;
-		}
 }
 
 __global__ void new_pos(ParticleSystem *ps)
