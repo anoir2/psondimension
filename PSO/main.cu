@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
 		init_rand(&prng_state, time(NULL));
 	//	target_pos.x = range_rand(coord_min, coord_max, &prng_state);
 	//	target_pos.y = range_rand(coord_min, coord_max, &prng_state);
-		target_pos.n = n_dimensions;
+	//	target_pos.n = n_dimensions;
 
 		target_pos.n = n_dimensions;
 		target_pos.dim[0] = -0.287776;
@@ -161,8 +161,8 @@ int main(int argc, char *argv[])
 	//cudaMalloc(&devicePointer,sizeof(Particle) * n_particle);
 	/* Compute the current fitness and best position */
 
-	init_particle<<< n_particle ,1 >>>(ps);
-	find_min_fitness<<< n_particle,1 >>>(ps);
+	init_particle<<<n_blocks, n_thread>>>(ps);
+	find_min_fitness<<< 1,1 >>>(ps);
 
 	ParticleSystem *psHost = (ParticleSystem*)malloc(sizeof(ParticleSystem));
     cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost);
@@ -370,28 +370,23 @@ __device__ __host__ void init_rand(uint64_t *prng_state, int i)
  * Returns fitness of initial position. */
 __global__ void init_particle(ParticleSystem *ps)
 {
-	int index = blockIdx.x;
+	int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	if(particleIndex >= ps->num_particles)
+		return;
 	uint64_t prng_state;
-	init_rand(&prng_state, index);
-	floatN pos,vel;
+	init_rand(&prng_state, particleIndex);
+	floatN pos;
 	int j;
 	int nDim = ps->dim_particles;
-	Particle *p = ps->particle + index;
-	/* we initialize each component of the position
-	 * to a random number between coord_min and coord_max,
-	 * each component of the velocity to a random number
-	 * between -coord_range and coord_range.
-	 * The initial position is also the current best_pos,
-	 * for which we also compute the fitness */
-	pos.dim[0] = range_rand(coord_min, coord_max, &prng_state);
-	pos.dim[1] = range_rand(coord_min, coord_max, &prng_state);
+	Particle *p = &ps->particle[particleIndex];
 
 	for (j = 0; j < nDim; j++){
-		vel.dim[j] = range_rand(-coord_range, coord_range, &prng_state);
+		pos.dim[j] = ps->particle[particleIndex].pos.dim[j] = range_rand(coord_min, coord_max, &prng_state);
 	}
-	pos.n = vel.n = nDim;
-	p->pos = pos;
-	p->vel = vel;
+	for (j = 0; j < nDim; j++){
+		ps->particle[particleIndex].vel.dim[j] = range_rand(-coord_range, coord_range, &prng_state);
+	}
+	pos.n = ps->particle[particleIndex].pos.n = ps->particle[particleIndex].vel.n = nDim;
 	p->best_pos = pos;
 	p->best_fit = p->fitness = fitness(&pos);
 	p->prng_state = prng_state;
@@ -433,17 +428,22 @@ __global__ void new_pos(ParticleSystem *ps)
 		return;
 	Particle *p = &ps->particle[particleIndex];
 	int i;
+	float dim_val, fit1 = 0, fit2 = 0;
 
 	for(i = 0; i < p->pos.n; i++){
 		p->pos.dim[i] += step_factor*p->vel.dim[i];
 		if (p->pos.dim[i] > coord_max) p->pos.dim[i] = coord_max;
 		else if (p->pos.dim[i] < coord_min) p->pos.dim[i] = coord_min;
+
+		dim_val = p->pos.dim[i];
+		fit1 += pow(dim_val - target_pos_shared.dim[i],2);
+		fit2 += pow(dim_val,2);
+
 	}
 
-
-	/* Compute the new fitness */
-	const float fit = p->fitness = fitness(&p->pos);
-	if (fit < p->best_fit) {
+	// ### newpos
+	p->fitness = fit1*(100*fit2+1)/10;
+	if (p->fitness < p->best_fit) {
 		p->best_fit = p->fitness;
 		p->best_pos = p->pos;
 	}
