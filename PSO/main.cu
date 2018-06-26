@@ -90,15 +90,38 @@ __const__ float step_factor = 1;
 __device__ __host__ uint32_t MWC64X(uint64_t *state);
 __device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
 __device__ __host__ void init_rand(uint64_t *prng_state, int i);
-
 __device__ float fitness(const floatN *pos);
+__device__ void warp_reduce_min( float smem[64]);
 __global__ void init_particle(ParticleSystem *ps);
-__global__ void init_cuda_system(ParticleSystem *ps, int n_particle, int dim_n);
 __global__ void find_min_fitness(ParticleSystem *ps);
-__global__ void find_min_fitness_v2(ParticleSystem *ps);
+__global__ void find_min_fitness_parallel(ParticleSystem *ps, float* in, float* out, int n_in);
 __global__ void new_vel(ParticleSystem *ps);
 __global__ void new_pos(ParticleSystem *ps);
-__global__ void new_pos_vel(ParticleSystem *ps);
+
+void parallel_fitness(ParticleSystem *ps, int n_particle, int n_thread){
+	int shmdim;
+	float *fitness_device_out,*fitness_device_in = NULL;
+	int last_n_block;
+	int blocks = n_particle;
+	while(blocks != 1){
+		last_n_block = blocks;
+		blocks = ceil((float)blocks / n_thread);
+		if(blocks == 1){
+			n_thread = last_n_block;
+		}
+		shmdim = n_thread*sizeof(float);
+		printf("n blocchi %d \n", blocks);
+		cudaMalloc(&fitness_device_out, sizeof(float) * blocks);
+		find_min_fitness_parallel<<<blocks, n_thread,shmdim>>>(ps, fitness_device_in, fitness_device_out, last_n_block);
+		if(fitness_device_in != NULL)
+			cudaFree(fitness_device_in);
+		fitness_device_in = fitness_device_out;
+	}
+	fitness_device_out = (float*)malloc(sizeof(float));
+	cudaMemcpy(fitness_device_out, fitness_device_in, sizeof(float),cudaMemcpyDeviceToHost);
+	printf("risultato fitness parallela %f \n", *fitness_device_out);
+}
+
 void write_system(ParticleSystem **ps, int step);
 void check_error(cudaError_t err, const char *msg)
 {
@@ -111,9 +134,11 @@ void check_error(cudaError_t err, const char *msg)
 int main(int argc, char *argv[])
 {
 	ParticleSystem *ps;
+	ParticleSystem *hostPS;
+	Particle *devicePointer;
 	//Particle* devicePointer;
 	unsigned step = 0;
-	int n_particle = argc > 1 ? atoi(argv[1]) : 128;
+	int n_particle = argc > 1 ? atoi(argv[1]) : 33;
 
 //#define MAX_STEPS (1<<20) /* run for no more than 1Mi steps */
 //#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
@@ -134,27 +159,37 @@ int main(int argc, char *argv[])
 	#define STEP_CHECK_FREQ 1 /* after how many steps to write the system and check the time */
 	int n_dimensions = DIM;
 	int n_thread = 32;
-	int n_blocks = (n_particle / n_thread) + n_particle%n_thread;
-	dim3 block_thread(n_thread,n_dimensions,1);
-		/* Initialize the target position */
-		uint64_t prng_state;
-		init_rand(&prng_state, time(NULL));
-	//	target_pos.x = range_rand(coord_min, coord_max, &prng_state);
-	//	target_pos.y = range_rand(coord_min, coord_max, &prng_state);
-	//	target_pos.n = n_dimensions;
+	int n_blocks = ceil((float)n_particle / n_thread) == 0 ? 1 : ceil((float)n_particle / n_thread);
 
-		target_pos.n = n_dimensions;
-		target_pos.dim[0] = -0.287776;
-		target_pos.dim[1] = 0.520416;
-		cudaMemcpyToSymbol(target_pos_shared, &target_pos, sizeof(floatN));
+	dim3 block_thread(n_thread,n_dimensions,1);
+
+	/* Initialize the target position */
+	uint64_t prng_state;
+	init_rand(&prng_state, time(NULL));
+//	target_pos.x = range_rand(coord_min, coord_max, &prng_state);
+//	target_pos.y = range_rand(coord_min, coord_max, &prng_state);
+//	target_pos.n = n_dimensions;
+
+	target_pos.n = n_dimensions;
+	target_pos.dim[0] = -0.287776;
+	target_pos.dim[1] = 0.520416;
+	cudaMemcpyToSymbol(target_pos_shared, &target_pos, sizeof(floatN));
 
 	/* Initialize a system with the number of particles given
 	 * on the command-line, defaulting to something which is
 	 * related to the number of dimensions */
 
 
+
+	cudaMalloc(&devicePointer,sizeof(Particle) * n_particle);
+	hostPS = (ParticleSystem*)malloc(sizeof(ParticleSystem));
+	hostPS->particle = devicePointer;
+	hostPS->dim_particles = n_dimensions;
+	hostPS->num_particles = n_particle;
+	hostPS->global_fitness = HUGE_VALF;
 	cudaMalloc(&ps,sizeof(ParticleSystem));
-	init_cuda_system<<<1,1>>>(ps, n_particle,n_dimensions);
+	cudaMemcpy(ps, hostPS, sizeof(ParticleSystem),cudaMemcpyHostToDevice);
+
 	//init_system(&ps,n_particle, dimensions);
 	//ps->num_particles = n_particle;
 	/* Allocate array of particles */
@@ -163,6 +198,7 @@ int main(int argc, char *argv[])
 	/* Compute the current fitness and best position */
 
 	init_particle<<<n_blocks, n_thread>>>(ps);
+	parallel_fitness(ps, n_particle, n_thread);
 	find_min_fitness<<< 1,1 >>>(ps);
 
 	ParticleSystem *psHost = (ParticleSystem*)malloc(sizeof(ParticleSystem));
@@ -199,7 +235,7 @@ int main(int argc, char *argv[])
 		cudaEventElapsedTime(&runtime, before_init_particle, after_init_particle);
 		printf("step %d new_pos tempo %f\n",step, runtime);
 		//new_pos_vel<<<n_particle, 1>>>(ps);
-		find_min_fitness_v2<<<1,1>>>(ps);
+		find_min_fitness<<<1,1>>>(ps);
 	    cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost);
 	    float fitness_min = psHost->current_fitness;
 		if (fitness_min < TARGET_FITNESS)
@@ -445,40 +481,14 @@ __global__ void new_pos(ParticleSystem *ps)
 	}
 }
 
-__global__ void init_cuda_system(ParticleSystem *ps, int n_particle, int dim_n){
-	ps->particle = (Particle*)malloc(sizeof(Particle) * n_particle);
-	ps->num_particles = n_particle;
-	ps->dim_particles = dim_n;
-}
-
 __global__ void find_min_fitness(ParticleSystem *ps){
-	int i_min = 0;
-	int i;
-
 	float fitness_min = HUGE_VALF;
-	for (i = 0; i < ps->num_particles; ++i) {
-		/* initialize the i-th particle */
-		//Particle p = ps.particle[0];
-		float fitness = (ps->particle + i)->fitness;
-		/* use its position as global best position if the fitness is
-		 * less than the current global fitness */
-		if (fitness < fitness_min) {
-			i_min = i;
-			fitness_min = fitness;
-		}
-	}
-
-	ps->global_fitness = ps->current_fitness = fitness_min;
-	ps->global_best_pos = ps->current_best_pos = ps->particle[i_min].pos;
-}
-
-__global__ void find_min_fitness_v2(ParticleSystem *ps){
-	float fitness_min = HUGE_VALF;
+	float fitness;
 	int i, i_min = 0;
-	for (i = 0; i < ps->num_particles; ++i) {
+	for (i = 0; i < ps->num_particles; i++) {
 		/* initialize the i-th particle */
 		//Particle p = ps.particle[0];
-		float fitness = (ps->particle + i)->fitness;
+		fitness = (ps->particle + i)->fitness;
 		/* use its position as global best position if the fitness is
 		 * less than the current global fitness */
 		if (fitness < fitness_min) {
@@ -493,4 +503,94 @@ __global__ void find_min_fitness_v2(ParticleSystem *ps){
 		ps->global_fitness = fitness_min;
 		ps->global_best_pos = ps->current_best_pos;
 	}
+}
+
+__global__ void find_min_fitness_parallel(ParticleSystem *ps, float* in, float* out, int n_in){
+	extern __shared__ float sm[];
+	uint tid=threadIdx.x;
+	uint i=blockIdx.x*blockDim.x+threadIdx.x;
+	int index;
+	if(i >= ps->num_particles || i >= n_in)
+			return;
+	if(blockIdx.x == 1)
+	{
+		index = 0;
+	}
+	sm[tid] = in != NULL ? in[i] : (ps->particle + i)->fitness;
+	//copy to SM
+	for (int stride=1;stride<blockDim.x && index+stride < n_in;stride*=2)
+	{
+		__syncthreads();
+		index = 2*stride*tid;
+		if (index<blockDim.x && sm[index] > sm[index+stride] && index+stride < n_in)
+			sm[index] = sm[index+stride];
+
+	}
+	if (tid==0){
+		out[blockIdx.x]=sm[0];//copy back
+		printf("parallelo blocco %d =  %f\n", blockIdx.x,sm[0]);
+	}
+	//d[blockIdx.x] containts the sum of the block
+//	__shared__ float smem_min[64];
+//
+//	int tid = threadIdx.x + blockIdx.x*els_per_block;
+//
+//	float min = HUGE_VALF;
+//	float val;
+//
+//	const int iters = els_per_block/threads;
+//
+//	for(int i = 0; i < iters; i++)
+//	{
+//		if(tid + i*threads > ps->num_particles)
+//			continue;
+//		val = (ps->particle + tid + i*threads)->fitness;
+//		min = val < min ? val : min;
+//		printf("ci sono arrivato");
+//	}
+//
+//
+//	if(threads == 32)
+//		smem_min[threadIdx.x+32] = 0.0f;
+//
+//	smem_min[threadIdx.x] = min;
+//
+//	__syncthreads();
+//
+//	if(threadIdx.x < 32)
+//		warp_reduce_min(smem_min);
+//
+//	if(threadIdx.x == 0){
+//		printf("parallelo ris best fit: %f",smem_min[threadIdx.x]);
+////		ps->current_fitness = smem_min[threadIdx.x];
+////		ps->current_best_pos = ps->particle[i_min].pos;
+////
+////		if (smem_min[threadIdx.x] < ps->global_fitness) {
+////			ps->global_fitness = smem_min[threadIdx.x];
+////			ps->global_best_pos = ps->current_best_pos;
+////		}
+//	}
+}
+
+__device__ void warp_reduce_min( float smem[64])
+{
+
+	smem[threadIdx.x] = smem[threadIdx.x+32] < smem[threadIdx.x] ?
+						smem[threadIdx.x+32] : smem[threadIdx.x];
+
+	smem[threadIdx.x] = smem[threadIdx.x+16] < smem[threadIdx.x] ?
+						smem[threadIdx.x+16] : smem[threadIdx.x];
+
+	smem[threadIdx.x] = smem[threadIdx.x+8] < smem[threadIdx.x] ?
+						smem[threadIdx.x+8] : smem[threadIdx.x];
+
+	smem[threadIdx.x] = smem[threadIdx.x+4] < smem[threadIdx.x] ?
+						smem[threadIdx.x+4] : smem[threadIdx.x];
+
+	smem[threadIdx.x] = smem[threadIdx.x+2] < smem[threadIdx.x] ?
+						smem[threadIdx.x+2] : smem[threadIdx.x];
+
+	smem[threadIdx.x] = smem[threadIdx.x+1] < smem[threadIdx.x] ?
+						smem[threadIdx.x+1] : smem[threadIdx.x];
+
 }
