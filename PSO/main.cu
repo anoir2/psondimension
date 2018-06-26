@@ -172,6 +172,9 @@ int main(int argc, char *argv[])
 		}
 	}
 	write_system(&psHost, step, new_vel_time, new_pos_time, fitness_min_time);
+	free(psHost);
+	check_error(cudaFree(ps),"free ps");
+	check_error(cudaFree(devicePointer),"free devicePointer");
 }
 
 void write_system(ParticleSystem **psdb, int step, float new_vel, float new_pos, float fitness_min)
