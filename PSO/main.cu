@@ -15,12 +15,6 @@
 #define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
 #define STEP_CHECK_FREQ 50 /* after how many steps to write the system and check the time */
 
-/*	################## TEST PURPOSE ##################	*/
-//#define MAX_STEPS (200) /* run for no more than 1Mi steps */
-//#define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
-//#define STEP_CHECK_FREQ 1 /* after how many steps to write the system and check the time */
-/*	################## TEST PURPOSE ##################	*/
-
 /* n-dimensional space */
 typedef struct floatN
 {
@@ -128,11 +122,6 @@ int main(int argc, char *argv[])
 		printf("%f,", target_pos.dim[j]);
 	}
 	printf(")\n");
-
-	/*	################# TWO DIMENSION TEST #################	*/
-	//target_pos.dim[0] = -0.287776;
-	//target_pos.dim[1] = 0.520416;
-	/*	################# TWO DIMENSION TEST #################	*/
 
 	check_error(cudaMemcpyToSymbol(target_pos_shared, &target_pos, sizeof(floatN)),"memory cpy to device target_pos");
 
