@@ -1,19 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <math.h>
 #include <string.h>
 #include <float.h>
 #include <errno.h>
 #include <stdint.h>
 #include <cuda_runtime_api.h>
-#define DIM 2
+#define DIM 16
 #define SHARED_MEMORY_DIM ((1<<15)+(1<<14)) // 48KB
-#define N_THREAD_GPU (1<<5)
+#define N_THREAD_GPU (1<<8) // limit is 1024
 
 #define MAX_STEPS (1<<20) /* run for no more than 1Mi steps */
 #define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
-#define STEP_CHECK_FREQ 50 /* after how many steps to write the system and check the time */
+#define STEP_CHECK_FREQ 200 /* after how many steps to write the system and check the time */
 
 /* n-dimensional space */
 typedef struct floatN
@@ -53,41 +52,42 @@ typedef struct ParticleSystem
 } ParticleSystem;
 
 /* Extents of the domain in each dimension */
-static const float coord_min = -1;
-static const float coord_max = 1;
-static const float coord_range = 2;
+#define coord_min -1
+#define coord_max 1
+#define coord_range 2
 floatN target_pos;	/* The target position */
-__device__ floatN target_pos_shared;
+__constant__ floatN target_pos_shared;
+float fitness_min;
 
 
 
 /* Overall weight for the old velocity, best position distance and global
  * best position distance in the computation of the new velocity
  */
-__const__ float vel_omega = .9;
-__const__ float vel_phi_best = 2;
-__const__ float vel_phi_global = 2;
+#define vel_omega 0.9
+#define vel_phi_best 2
+#define vel_phi_global 2
 
 /* The contribution of the velocity to the new position. Set to 1
  * to use the standard PSO approach of adding the whole velocity
  * to the position.
  */
-__const__ float step_factor = 1;
+#define step_factor 1
 
 __device__ __host__ uint32_t MWC64X(uint64_t *state);
 __device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
 __device__ __host__ void init_rand(uint64_t *prng_state, int i);
-__device__ float fitness(const floatN *pos);
+__device__ float fitness(__restrict__ const floatN *pos);
 __global__ void init_particle(ParticleSystem *ps);
-__global__ void find_min_fitness_parallel(ParticleSystem *ps, fitness_pos* in, fitness_pos* out, int offset, int n_in, int n_blocks);
-__global__ void new_vel(ParticleSystem *ps);
-__global__ void new_pos(ParticleSystem *ps);
+__global__ void find_min_fitness_parallel(__restrict__ ParticleSystem *ps,__restrict__ const fitness_pos* in, fitness_pos* out,const int offset,const int n_in,const int blocks);
+__global__ void new_vel_pos(__restrict__ ParticleSystem *ps);
 int ceil_log2(unsigned long long x);
 void check_error(cudaError_t err, const char *msg);
 void start_time_record(cudaEvent_t *before, cudaEvent_t *after);
 void stop_time_record(cudaEvent_t *before, cudaEvent_t *after, float *runtime);
-void parallel_fitness(ParticleSystem *ps, int n_particle, int n_thread);
-void write_system(ParticleSystem **psdb, int step, float new_vel, float new_pos, float fitness_min);
+void parallel_fitness(__restrict__ ParticleSystem *ps,  const int n_particle, int n_thread);
+void write_system(__restrict__ ParticleSystem **psdb, const int step, const float new_vel, const float new_pos, const float fitness_min);
+
 
 int main(int argc, char *argv[])
 {
@@ -98,14 +98,11 @@ int main(int argc, char *argv[])
 	unsigned n_particle;
 	cudaEvent_t before, after;
 	float new_vel_time = 0, new_pos_time = 0, fitness_min_time = 0;
-	float fitness_min;
 	int j;
 	int n_blocks;
 	int n_dimensions = DIM;
 	int n_thread = N_THREAD_GPU;
-	dim3 block_thread(n_thread,n_dimensions,1);
 	uint64_t prng_state;
-
 	/*	Get particle's numbers, default 128	*/
 	n_particle = argc > 1 ? atoi(argv[1]) : 128;
 
@@ -122,6 +119,7 @@ int main(int argc, char *argv[])
 		printf("%f,", target_pos.dim[j]);
 	}
 	printf(")\n");
+
 
 	check_error(cudaMemcpyToSymbol(target_pos_shared, &target_pos, sizeof(floatN)),"memory cpy to device target_pos");
 
@@ -140,21 +138,19 @@ int main(int argc, char *argv[])
 	/*	init particle system and calculate initial fitness	*/
 	init_particle<<<n_blocks, n_thread>>>(ps);
 	parallel_fitness(ps, n_particle, n_thread);
-
 	check_error(cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost),"refresh PS host");
 	write_system(&psHost, step, new_vel_time, new_pos_time, fitness_min_time);
 
 	while (step < MAX_STEPS) {
 		++step;
 
+		int n_thread_pos = SHARED_MEMORY_DIM/(sizeof(float)*DIM) < N_THREAD_GPU ?
+								SHARED_MEMORY_DIM/(sizeof(float)*DIM) : N_THREAD_GPU;
+		int n_blocks_pos = ceil((float)n_particle / n_thread_pos) == 0 ? 1 : ceil((float)n_particle / n_thread_pos);
 		/* Compute the new velocity for each particle */
-		start_time_record(&before,&after);
-		new_vel<<<n_blocks, block_thread>>>(ps);
-		stop_time_record(&before,&after,&new_vel_time);
-
 		/* Update the position of each particle, and the global fitness */
 		start_time_record(&before,&after);
-		new_pos<<<n_blocks, n_thread>>>(ps);
+		new_vel_pos<<<n_blocks_pos, n_thread_pos, sizeof(float)*n_thread_pos>>>(ps);
 		stop_time_record(&before,&after,&new_pos_time);
 
 		/* Calculate min fitness */
@@ -162,12 +158,10 @@ int main(int argc, char *argv[])
 		parallel_fitness(ps, n_particle, n_thread);
 		stop_time_record(&before,&after,&fitness_min_time);
 
-	    check_error(cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost),"refresh PS host");
-
-	    fitness_min = psHost->current_fitness;
 		if (fitness_min < TARGET_FITNESS)
 			break;
 		if (step % STEP_CHECK_FREQ == 0) {
+		    check_error(cudaMemcpy(psHost, ps, sizeof(ParticleSystem),cudaMemcpyDeviceToHost),"refresh PS host");
 			write_system(&psHost, step, new_vel_time, new_pos_time, fitness_min_time);
 		}
 	}
@@ -177,10 +171,10 @@ int main(int argc, char *argv[])
 	check_error(cudaFree(devicePointer),"free devicePointer");
 }
 
-void write_system(ParticleSystem **psdb, int step, float new_vel, float new_pos, float fitness_min)
+void write_system(__restrict__ ParticleSystem **psdb, const int step, const float new_vel, const float new_pos, const float fitness_min)
 {
 	int j;
-	ParticleSystem *ps = (*psdb);
+	const ParticleSystem *ps = (*psdb);
 
 
 	printf("step %u, best fitness: current %g, so far %g\n", step,
@@ -212,7 +206,7 @@ void write_system(ParticleSystem **psdb, int step, float new_vel, float new_pos,
  * to the origin: this puts a local minimum at the origin,
  * which is good to test if the method actually finds the global
  * minimum or not */
-__device__ float fitness(const floatN *pos)
+__device__ float fitness(__restrict__ const floatN *pos)
 {
 	int i;
 	float fit1 = 0,fit2 = 0, dim_val;
@@ -276,46 +270,41 @@ __global__ void init_particle(ParticleSystem *ps)
 	p->prng_state = prng_state;
 }
 
-/* Kernel function to compute the new velocity of a given particle */
-__global__ void new_vel(ParticleSystem *ps)
+/* Kernel function to compute the new position and new velocity of a given particle */
+__global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
 {
-	int particleIndex = (blockIdx.x * blockDim.x + threadIdx.x);
+	extern __shared__ float smpos[];
+	const int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	const int particleIndexSHM = threadIdx.x;
 	if(particleIndex >= ps->num_particles)
 		return;
-
-	int dim = threadIdx.y;
 	Particle *p = &ps->particle[particleIndex];
+
+	int i;
+	float fit1 = 0, fit2 = 0;
+
 	floatN *nvel = &p->vel;
 	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 
-	float pbest =  p->best_pos.dim[dim] - p->pos.dim[dim];
-	float gbest = ps->global_best_pos.dim[dim] - p->pos.dim[dim];
+	for(i = 0; i < DIM; i++){
+		smpos[particleIndexSHM] = p->pos.dim[i];
+		float pbest =  p->best_pos.dim[i] - smpos[particleIndexSHM];
+		float gbest = ps->global_best_pos.dim[i] - smpos[particleIndexSHM];
 
-	nvel->dim[dim] = vel_omega*nvel->dim[dim] + best_vec_rand_coeff*vel_phi_best*pbest +
-			  global_vec_rand_coeff*vel_phi_global*gbest;
+		nvel->dim[i] = vel_omega*nvel->dim[i] + best_vec_rand_coeff*vel_phi_best*pbest +
+				  global_vec_rand_coeff*vel_phi_global*gbest;
 
-	if(nvel->dim[dim] > coord_range) nvel->dim[dim] = coord_range;
-	else if (nvel->dim[dim] < -coord_range) nvel->dim[dim] = -coord_range;
-}
+		if(nvel->dim[i] > coord_range) nvel->dim[i] = coord_range;
+		else if (nvel->dim[i] < -coord_range) nvel->dim[i] = -coord_range;
 
-/* Kernel function to compute the new position of a given particle */
-__global__ void new_pos(ParticleSystem *ps)
-{
-	int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
-	if(particleIndex >= ps->num_particles)
-		return;
-	Particle *p = &ps->particle[particleIndex];
-	int i;
-	float dim_val, fit1 = 0, fit2 = 0;
-	for(i = 0; i < p->pos.n; i++){
-		p->pos.dim[i] += step_factor*p->vel.dim[i];
-		if (p->pos.dim[i] > coord_max) p->pos.dim[i] = coord_max;
-		else if (p->pos.dim[i] < coord_min) p->pos.dim[i] = coord_min;
+		smpos[particleIndexSHM] += (step_factor*nvel->dim[i]);
+		if (smpos[particleIndexSHM] > coord_max) smpos[particleIndexSHM] = coord_max;
+		else if (smpos[particleIndexSHM] < coord_min) smpos[particleIndexSHM] = coord_min;
 
-		dim_val = p->pos.dim[i];
-		fit1 += pow(dim_val - target_pos_shared.dim[i],2);
-		fit2 += pow(dim_val,2);
+		fit1 += (smpos[particleIndexSHM] - target_pos_shared.dim[i])*(smpos[particleIndexSHM] - target_pos_shared.dim[i]);
+		fit2 += (smpos[particleIndexSHM]*smpos[particleIndexSHM]);
+		p->pos.dim[i] = smpos[particleIndexSHM];
 	}
 
 	p->fitness = fit1*(100*fit2+1)/10;
@@ -326,15 +315,14 @@ __global__ void new_pos(ParticleSystem *ps)
 }
 
 /* Kernel function to compute the new global min fitness */
-__global__ void find_min_fitness_parallel(ParticleSystem *ps, fitness_pos* in, fitness_pos* out, int offset, int n_in, int blocks){
+__global__ void find_min_fitness_parallel(__restrict__ ParticleSystem *ps,__restrict__ const fitness_pos* in, fitness_pos* out,const int offset,const int n_in,const int blocks){
 	extern __shared__ fitness_pos sm[];
-	int tid=threadIdx.x;
-	uint i=(blockIdx.x*blockDim.x+threadIdx.x) + (offset*blockDim.x);
+	const int tid=threadIdx.x;
+	const int i=(blockIdx.x*blockDim.x+threadIdx.x) + (offset*blockDim.x);
 	int stride;
 	sm[tid].fitness = HUGE_VALF;
 	if(i >= ps->num_particles || i >= n_in)
 			return;
-
 	if(in != NULL){
 		sm[tid] = in[i];
 	}else{
@@ -413,7 +401,7 @@ int ceil_log2(unsigned long long x)
 }
 
 /*	Function to handle the Kernel function find_min_fitness_parallel to don't let the shared memory become full */
-void parallel_fitness(ParticleSystem *ps, int n_particle, int n_thread){
+void parallel_fitness(__restrict__ ParticleSystem *ps,  const int n_particle, int n_thread){
 	int shmdim;
 	fitness_pos *fitness_device_out,*fitness_device_in = NULL;
 	int last_n_block;
@@ -431,13 +419,14 @@ void parallel_fitness(ParticleSystem *ps, int n_particle, int n_thread){
 		}
 		cudaMalloc(&fitness_device_out, sizeof(fitness_pos) * blocks);
 		shmdim = n_thread*sizeof(fitness_pos);
-		if(max_parallel_particle_iteration < last_n_block){
+		if(max_parallel_particle_iteration < last_n_block && 0){
 			iteration = 0;
 			while(iteration + max_parallel_particle_iteration < blocks*n_thread){
 				find_min_fitness_parallel<<<max_blocks_per_iteration, n_thread,shmdim>>>
 									(ps, fitness_device_in, fitness_device_out, offset, last_n_block, blocks);
 				iteration += max_parallel_particle_iteration;
 				offset += (max_parallel_particle_iteration/n_thread);
+
 			}
 			int x = (blocks*n_thread) - (offset*n_thread);
 			x = ceil((float)x / n_thread);
@@ -453,5 +442,9 @@ void parallel_fitness(ParticleSystem *ps, int n_particle, int n_thread){
 		}
 		fitness_device_in = fitness_device_out;
 	}
-	check_error(cudaFree(fitness_device_out),"free fitness_device_out");
+	fitness_device_out = (fitness_pos*)malloc(sizeof(fitness_pos));
+	check_error(cudaMemcpy(fitness_device_out, fitness_device_in, sizeof(fitness_pos),cudaMemcpyDeviceToHost),"copy fitness_min");
+	fitness_min = fitness_device_out->fitness;
+	check_error(cudaFree(fitness_device_in),"free fitness_device_out");
+	free(fitness_device_out);
 }
