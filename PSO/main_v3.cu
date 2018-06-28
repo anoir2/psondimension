@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <math.h>
 #include <string.h>
 #include <float.h>
 #include <errno.h>
@@ -9,11 +8,11 @@
 #include <cuda_runtime_api.h>
 #define DIM 16
 #define SHARED_MEMORY_DIM ((1<<15)+(1<<14)) // 48KB
-#define N_THREAD_GPU (1<<5)
+#define N_THREAD_GPU (1<<8) // limit is 1024
 
 #define MAX_STEPS (1<<20) /* run for no more than 1Mi steps */
 #define TARGET_FITNESS (FLT_EPSILON) /* or until the fitness is less than this much */
-#define STEP_CHECK_FREQ 100 /* after how many steps to write the system and check the time */
+#define STEP_CHECK_FREQ 50 /* after how many steps to write the system and check the time */
 
 /* n-dimensional space */
 typedef struct floatN
@@ -53,9 +52,9 @@ typedef struct ParticleSystem
 } ParticleSystem;
 
 /* Extents of the domain in each dimension */
-static const float coord_min = -1;
-static const float coord_max = 1;
-static const float coord_range = 2;
+#define coord_min -1
+#define coord_max 1
+#define coord_range 2
 floatN target_pos;	/* The target position */
 __device__ floatN target_pos_shared;
 
@@ -64,15 +63,15 @@ __device__ floatN target_pos_shared;
 /* Overall weight for the old velocity, best position distance and global
  * best position distance in the computation of the new velocity
  */
-__const__ float vel_omega = .9;
-__const__ float vel_phi_best = 2;
-__const__ float vel_phi_global = 2;
+#define vel_omega 0.9
+#define vel_phi_best 2
+#define vel_phi_global 2
 
 /* The contribution of the velocity to the new position. Set to 1
  * to use the standard PSO approach of adding the whole velocity
  * to the position.
  */
-__const__ float step_factor = 1;
+#define step_factor 1
 
 __device__ __host__ uint32_t MWC64X(uint64_t *state);
 __device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
@@ -103,7 +102,6 @@ int main(int argc, char *argv[])
 	int n_blocks;
 	int n_dimensions = DIM;
 	int n_thread = N_THREAD_GPU;
-	dim3 block_thread(n_thread,n_dimensions,1);
 	uint64_t prng_state;
 
 	/*	Get particle's numbers, default 128	*/
@@ -147,14 +145,19 @@ int main(int argc, char *argv[])
 	while (step < MAX_STEPS) {
 		++step;
 
+
 		/* Compute the new velocity for each particle */
 		start_time_record(&before,&after);
-		new_vel<<<n_blocks, block_thread>>>(ps);
+		new_vel<<<n_blocks, n_thread>>>(ps);
 		stop_time_record(&before,&after,&new_vel_time);
+
+		int n_thread_pos = SHARED_MEMORY_DIM/(sizeof(float)*DIM) < N_THREAD_GPU ?
+								SHARED_MEMORY_DIM/(sizeof(float)*DIM) : N_THREAD_GPU;
+		int n_blocks_pos = ceil((float)n_particle / n_thread_pos) == 0 ? 1 : ceil((float)n_particle / n_thread_pos);
 
 		/* Update the position of each particle, and the global fitness */
 		start_time_record(&before,&after);
-		new_pos<<<n_blocks, n_thread>>>(ps);
+		new_pos<<<n_blocks_pos, n_thread_pos, sizeof(float)*n_thread_pos>>>(ps);
 		stop_time_record(&before,&after,&new_pos_time);
 
 		/* Calculate min fitness */
@@ -283,39 +286,44 @@ __global__ void new_vel(ParticleSystem *ps)
 	if(particleIndex >= ps->num_particles)
 		return;
 
-	int dim = threadIdx.y;
+	int dim;
 	Particle *p = &ps->particle[particleIndex];
 	floatN *nvel = &p->vel;
 	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 
-	float pbest =  p->best_pos.dim[dim] - p->pos.dim[dim];
-	float gbest = ps->global_best_pos.dim[dim] - p->pos.dim[dim];
+	for(dim = 0; dim < DIM;dim++){
+		float pbest =  p->best_pos.dim[dim] - p->pos.dim[dim];
+		float gbest = ps->global_best_pos.dim[dim] - p->pos.dim[dim];
 
-	nvel->dim[dim] = vel_omega*nvel->dim[dim] + best_vec_rand_coeff*vel_phi_best*pbest +
-			  global_vec_rand_coeff*vel_phi_global*gbest;
+		nvel->dim[dim] = vel_omega*nvel->dim[dim] + best_vec_rand_coeff*vel_phi_best*pbest +
+				  global_vec_rand_coeff*vel_phi_global*gbest;
 
-	if(nvel->dim[dim] > coord_range) nvel->dim[dim] = coord_range;
-	else if (nvel->dim[dim] < -coord_range) nvel->dim[dim] = -coord_range;
+		if(nvel->dim[dim] > coord_range) nvel->dim[dim] = coord_range;
+		else if (nvel->dim[dim] < -coord_range) nvel->dim[dim] = -coord_range;
+	}
 }
 
 /* Kernel function to compute the new position of a given particle */
 __global__ void new_pos(ParticleSystem *ps)
 {
+	extern __shared__ float smpos[];
 	int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	int particleIndexSHM = threadIdx.x;
 	if(particleIndex >= ps->num_particles)
 		return;
 	Particle *p = &ps->particle[particleIndex];
-	int i;
-	float dim_val, fit1 = 0, fit2 = 0;
-	for(i = 0; i < p->pos.n; i++){
-		p->pos.dim[i] += step_factor*p->vel.dim[i];
-		if (p->pos.dim[i] > coord_max) p->pos.dim[i] = coord_max;
-		else if (p->pos.dim[i] < coord_min) p->pos.dim[i] = coord_min;
 
-		dim_val = p->pos.dim[i];
-		fit1 += pow(dim_val - target_pos_shared.dim[i],2);
-		fit2 += pow(dim_val,2);
+	int i;
+	float fit1 = 0, fit2 = 0;
+	for(i = 0; i < DIM; i++){
+		smpos[particleIndexSHM] = p->pos.dim[i] + (step_factor*p->vel.dim[i]);
+		if (smpos[particleIndexSHM] > coord_max) smpos[particleIndexSHM] = coord_max;
+		else if (smpos[particleIndexSHM] < coord_min) smpos[particleIndexSHM] = coord_min;
+
+		fit1 += (smpos[particleIndexSHM] - target_pos_shared.dim[i])*(smpos[particleIndexSHM] - target_pos_shared.dim[i]);
+		fit2 += (smpos[particleIndexSHM]*smpos[particleIndexSHM]);
+		p->pos.dim[i] = smpos[particleIndexSHM];
 	}
 
 	p->fitness = fit1*(100*fit2+1)/10;
