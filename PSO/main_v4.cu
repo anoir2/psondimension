@@ -210,6 +210,7 @@ __device__ float fitness(__restrict__ const floatN *pos)
 {
 	int i;
 	float fit1 = 0,fit2 = 0, dim_val;
+	#pragma unroll
 	for(i = 0; i < pos->n; i++){
 		dim_val = pos->dim[i];
 
@@ -287,6 +288,7 @@ __global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
 	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 
+	#pragma unroll
 	for(i = 0; i < DIM; i++){
 		smpos[particleIndexSHM] = p->pos.dim[i];
 		float pbest =  p->best_pos.dim[i] - smpos[particleIndexSHM];
@@ -390,6 +392,7 @@ int ceil_log2(unsigned long long x)
   int j = 32;
   int i;
 
+  #pragma unroll
   for (i = 0; i < 6; i++) {
     int k = (((x & t[i]) == 0) ? 0 : j);
     y += k;
