@@ -6,8 +6,8 @@
 #include <errno.h>
 #include <stdint.h>
 #include <cuda_runtime_api.h>
-#define DIM 16
-#define SHARED_MEMORY_DIM ((1<<15)+(1<<14)) // 48KB
+#define DIM 64
+#define SHARED_MEMORY_DIM 1<<15//((1<<15)+(1<<14)) // 48KB
 #define N_THREAD_GPU (1<<10) // limit is 1024
 
 #define MAX_STEPS (1<<2) /* run for no more than 1Mi steps */
@@ -101,6 +101,7 @@ void init_mem(int n_particle){
 }
 int main(int argc, char *argv[])
 {
+
 	unsigned step = 0;
 	unsigned n_particle;
 	cudaEvent_t before, after;
@@ -143,8 +144,8 @@ int main(int argc, char *argv[])
 	while (step < MAX_STEPS) {
 		++step;
 
-		int n_thread_pos = SHARED_MEMORY_DIM/(sizeof(float)*DIM) < N_THREAD_GPU ?
-								SHARED_MEMORY_DIM/(sizeof(float)*DIM) : N_THREAD_GPU;
+		int n_thread_pos = SHARED_MEMORY_DIM/(sizeof(float2)*DIM) < N_THREAD_GPU ?
+								SHARED_MEMORY_DIM/(sizeof(float2)*DIM) : N_THREAD_GPU;
 		int n_blocks_pos = ceil((float)n_particle / n_thread_pos) == 0 ? 1 : ceil((float)n_particle / n_thread_pos);
 		/* Compute the new velocity for each particle */
 		/* Update the position of each particle, and the global fitness */
@@ -152,8 +153,8 @@ int main(int argc, char *argv[])
 		if(step == 2){
 			step = step+1-1;
 		}
-		dim3 n_t(n_thread_pos/DIM,DIM);
-		new_vel_pos<<<n_blocks_pos, n_t, sizeof(float)*n_thread_pos>>>();
+		dim3 n_t(8,DIM);
+		new_vel_pos<<<n_blocks_pos, n_t, sizeof(float2)*n_thread_pos*DIM>>>();
 		stop_time_record(&before,&after,&new_pos_time);
 
 		/* Calculate min fitness */
@@ -360,49 +361,64 @@ __global__ void init_particle()
 
 __global__ void new_vel_pos()
 {
-	extern __shared__ float smpos[];
+	extern __shared__ float2 smpos[];
 	const int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
-	const int particleIndexSHM = threadIdx.x;
+	const int particleIndexSHM = threadIdx.x * threadIdx.y;
 	const int particleIndexDIM = particleIndex * DIM + threadIdx.y;
+
+	const int indexDIM = threadIdx.y;
+	int stride = blockDim.y/2;
+
 	if(particleIndex >= num_particles)
 		return;
 	uint64_t prng_state_l = prng_state[particleIndex];
 
-	int i;
-	float fit1 = 0, fit2 = 0;
-
 	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state_l);
 	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state_l);
-	float pbest, gbest;
+	float velLocal = vel[particleIndexDIM]*vel_omega;
+	float posLocal = pos[particleIndexDIM];
+	float pbest =  (best_pos[particleIndexDIM] - posLocal) * best_vec_rand_coeff*vel_phi_best;
+	float gbest = (global_best_pos[indexDIM] - posLocal) * global_vec_rand_coeff*vel_phi_global;
 
-		float velLocal = vel[particleIndexDIM]*vel_omega;
-		smpos[particleIndexSHM] = pos[particleIndexDIM];
-		pbest =  (best_pos[particleIndexDIM] - smpos[particleIndexSHM]) * best_vec_rand_coeff*vel_phi_best;
-		gbest = (global_best_pos[i] - smpos[particleIndexSHM]) * global_vec_rand_coeff*vel_phi_global;
+	velLocal+= (pbest + gbest);
 
-		velLocal+= (pbest + gbest);
+	if(velLocal > coord_range) velLocal = coord_range;
+	else if (velLocal < -coord_range) velLocal = -coord_range;
 
-		if(velLocal > coord_range) velLocal = coord_range;
-		else if (velLocal < -coord_range) velLocal = -coord_range;
+	posLocal += (step_factor*velLocal);
+	if (posLocal > coord_max) posLocal = coord_max;
+	else if (posLocal < coord_min) posLocal = coord_min;
 
-		smpos[particleIndexSHM] += (step_factor*velLocal);
-		if (smpos[particleIndexSHM] > coord_max) smpos[particleIndexSHM] = coord_max;
-		else if (smpos[particleIndexSHM] < coord_min) smpos[particleIndexSHM] = coord_min;
+	smpos[particleIndexSHM].x = (velLocal - target_pos_shared[indexDIM])*(velLocal - target_pos_shared[indexDIM]);
+	smpos[particleIndexSHM].y = (velLocal*velLocal);
+	pos[particleIndexDIM] = posLocal;
+	vel[particleIndexDIM] = velLocal;
 
-//		fit1 += (smpos[particleIndexSHM] - target_pos_shared[i])*(smpos[particleIndexSHM] - target_pos_shared[i]);
-//		fit2 += (smpos[particleIndexSHM]*smpos[particleIndexSHM]);
-//		pos[particleIndexDIM] = smpos[particleIndexSHM];
-//		vel[particleIndexDIM] = velLocal;
-//
-//	prng_state[particleIndex] = prng_state_l;
-//	fitness_val[particleIndex] = fit1*(100*fit2+1)/10;
-//	if (fitness_val[particleIndex] < best_fit[particleIndex]) {
-//		best_fit[particleIndex] = fitness_val[particleIndex];
-//		memcpy(best_pos + particleIndex,pos + particleIndex,sizeof(float)*DIM);
-//		if(fitness_val[particleIndex] > 0.0181 && fitness_val[particleIndex] < 0.0183){
-//			printf("posizione %d\n",particleIndex);
-//		}
-//	}
+	prng_state[particleIndex] = prng_state_l;
+	__syncthreads();
+
+	for (;stride>0;stride>>=1)
+	{
+		__syncthreads();
+		if (indexDIM<stride){
+			smpos[particleIndexSHM].x += smpos[particleIndexSHM+stride].x;
+			smpos[particleIndexSHM].y += smpos[particleIndexSHM+stride].y;
+		}
+	}
+
+	if (indexDIM==0){
+		float fitness = smpos[particleIndexSHM].x*(100*smpos[particleIndexSHM].y+1)/10;
+		fitness_val[particleIndex] = fitness;
+		if (fitness < best_fit[particleIndex]) {
+			best_fit[particleIndex] = fitness;
+			memcpy(best_pos + particleIndex,pos + particleIndex,sizeof(float)*DIM);
+//			if(fitness_val[particleIndex] > 0.0181 && fitness_val[particleIndex] < 0.0183){
+//				printf("posizione %d\n",particleIndex);
+//			}
+		}
+	}
+
+
 }
 
 /* Kernel function to compute the new global min fitness */
