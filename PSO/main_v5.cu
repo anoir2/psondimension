@@ -310,7 +310,6 @@ __global__ void new_vel_pos()
 
 	pos[particleIndexDIM] = posLocal;
 	vel[particleIndexDIM] = velLocal;
-	if(indexDIM == 1)printf("particle %d vel %i %f \n",particleIndex,indexDIM,velLocal);
 	prng_state[particleIndex] = prng_state_l;
 }
 
