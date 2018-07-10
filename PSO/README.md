@@ -6,7 +6,7 @@ A CUDA Implementation
 ___
 
 ## Overview
-Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm Optimization. Introdotta da James Kennedy e Russell Eberhart nel 1995 e sviluppata ampiamente nel 2001 come metodo per l’ottimizzazione di funzioni non lineari continue, si ispira alla simulazione di un modello sociale semplificato (lo stormo = flock, o meglio ancora lo sciame = swarm). La seguente implementazione prevede un sistema di N particelle con M dimensioni che si muoveranno con una velocità randomica. La funzione di fitness calcola la distanza euclidea tra le N particelle e il target finale e quando andrà sotto la soglia da noi impostata, si può dire che l'algoritmo sia concluso. 
+Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm Optimization. Introdotta da James Kennedy e Russell Eberhart nel 1995 e sviluppata ampiamente nel 2001 come metodo per l’ottimizzazione di funzioni non lineari continue, si ispira alla simulazione di un modello sociale semplificato (lo stormo = flock, o meglio ancora lo sciame = swarm). La seguente implementazione prevede un sistema di N particelle con M dimensioni che si muoveranno con una velocità randomica. La funzione di fitness calcola la distanza euclidea tra le N particelle e il target finale e quando andrà sotto la soglia da noi impostata, si può dire che l'algoritmo sia concluso. Nel file RESULTS.md si trova l'output generato da nvprof.
 
 ## Implementazione
 ### main_v2.cu
