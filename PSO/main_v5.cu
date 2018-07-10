@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <cuda_runtime_api.h>
-#define DIM 32
+#define DIM 64
 #define SHARED_MEMORY_DIM ((1<<15)+(1<<14)) // 48KB
 #define N_THREAD_GPU (1<<10) // limit is 1024
 
@@ -65,7 +65,7 @@ __device__ __host__ uint32_t MWC64X(uint64_t *state);
 __device__ __host__ float range_rand(float min, float max, uint64_t *prng_state);
 __device__ __host__ void init_rand(uint64_t *prng_state, int i);
 __device__ float fitness(float *pos);
-__device__ void warp_control_float2(float2* smpos, int particleIndexSHM);
+__device__ void warp_control_float2(float2* smpos, int particleIndexSHM, int indexDIM);
 __device__ void warp_control_float(float* smpos, int particleIndexSHM);
 __global__ void init_particle();
 __global__ void find_min_fitness_parallel(__restrict__ const fitness_pos* in, fitness_pos* out,const int offset,const int n_in,const int blocks);
@@ -147,19 +147,20 @@ int main(int argc, char *argv[])
 
 		int n_thread_pos = SHARED_MEMORY_DIM/(sizeof(float2)*DIM) < N_THREAD_GPU ?
 								SHARED_MEMORY_DIM/(sizeof(float2)*DIM) : N_THREAD_GPU;
-		int n_blocks_pos = ceil((float)n_particle / N_THREAD_GPU) == 0 ? 1 : ceil((float)n_particle / N_THREAD_GPU);
+		int n_blocks_pos_calc_fit = ceil((float)n_particle / (n_thread_pos/DIM)) == 0 ? 1 : ceil((float)n_particle / (n_thread_pos/DIM));
 
+		int n_blocks_pos_vel = ceil((float)n_particle / (N_THREAD_GPU/DIM)) == 0 ? 1 : ceil((float)n_particle / (N_THREAD_GPU/DIM));
 		/* Compute the new velocity for each particle */
 		/* Update the position of each particle, and the global fitness */
 		dim3 n_t(DIM,N_THREAD_GPU/DIM);
 		start_time_record(&before,&after);
-		new_vel_pos<<<n_blocks_pos, n_t>>>();
+		new_vel_pos<<<n_blocks_pos_vel, n_t>>>();
 		stop_time_record(&before,&after,&new_vel_pos_time);
 
 		/* Calculate new fitness for each particle*/
 		dim3 n_t_calc_fit(DIM,n_thread_pos/DIM);
 		start_time_record(&before,&after);
-		calc_fitness<<<n_blocks_pos, n_t_calc_fit, sizeof(float2)*n_thread_pos>>>();
+		calc_fitness<<<n_blocks_pos_calc_fit, n_t_calc_fit, sizeof(float2)*n_thread_pos>>>();
 		stop_time_record(&before,&after,&calc_fitness_time);
 
 		/* Calculate min fitness */
@@ -329,7 +330,7 @@ __global__ void calc_fitness()
 	smpos[particleIndexSHM].x = (posLocal - target_pos_shared[indexDIM])*(posLocal - target_pos_shared[indexDIM]);
 	smpos[particleIndexSHM].y = (posLocal*posLocal);
 
-	warp_control_float2(smpos,particleIndexSHM);
+	warp_control_float2(smpos,particleIndexSHM, indexDIM);
 
 	if (indexDIM==0){
 		float fitness = smpos[particleIndexSHM].x*(100*smpos[particleIndexSHM].y+1)/10;
@@ -450,10 +451,10 @@ void check_error(cudaError_t err, const char *msg)
   }
 }
 
-__device__ void warp_control_float2(float2* smpos, int particleIndexSHM)
+__device__ void warp_control_float2(float2* smpos, int particleIndexSHM, int indexDIM)
 {
 	__syncthreads();
-	#if DIM > 1024
+	#if DIM > 1
 	for (int stride = blockDim.x/2;stride>0;stride>>=1)
 	{
 		if (indexDIM<stride){
@@ -465,26 +466,6 @@ __device__ void warp_control_float2(float2* smpos, int particleIndexSHM)
 	#else
 	if (particleIndexSHM < DIM/2)
 	{
-		#if DIM >= 512
-		smpos[particleIndexSHM].x += smpos[particleIndexSHM + 256].x;
-		smpos[particleIndexSHM].y += smpos[particleIndexSHM + 256].y;
-		__syncthreads();
-		#endif
-		#if DIM >= 256
-		smpos[particleIndexSHM].x += smpos[particleIndexSHM + 128].x;
-		smpos[particleIndexSHM].y += smpos[particleIndexSHM + 128].y;
-		__syncthreads();
-		#endif
-		#if DIM >= 128
-		smpos[particleIndexSHM].x += smpos[particleIndexSHM + 64].x;
-		smpos[particleIndexSHM].y += smpos[particleIndexSHM + 64].y;
-		__syncthreads();
-		#endif
-		#if DIM >= 64
-		smpos[particleIndexSHM].x += smpos[particleIndexSHM + 32].x;
-		smpos[particleIndexSHM].y += smpos[particleIndexSHM + 32].y;
-		__syncthreads();
-		#endif
 		#if DIM >= 32
 		smpos[particleIndexSHM].x += smpos[particleIndexSHM + 16].x;
 		smpos[particleIndexSHM].y += smpos[particleIndexSHM + 16].y;
