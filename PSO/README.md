@@ -113,3 +113,68 @@ __global__ void find_min_fitness_parallel(ParticleSystem *ps, fitness_pos* in, f
 }
 ...
 ```
+### main_v3.cu
+I cambiamenti fatti in questa versione sono la trasformazione di tutte le variabili costanti in ***#DEFINE***, la modifica della funzione ***new_vel*** mettendo la gestione delle dimensioni di una singola particella all'interno di un ciclo for e aggiungendo la shared memory al kernel ***new_pos***. La trasformazione di tutte le costanti in ***#DEFINE*** ha rimosso i tempi di lettura da parte dei 3 kernel facendo si che ci fosse un boost generale delle prestazioni del 40%. 
+
+##### **new_vel**
+Spostando la gestione delle dimensioni, per ogni singola particella, dentro il kernel new_vel, ha diminuito i tempi di esecuzione del 30% rispetto al precedente.
+```c
+...
+__global__ void new_vel(ParticleSystem *ps)
+{
+	int particleIndex = (blockIdx.x * blockDim.x + threadIdx.x);
+	if(particleIndex >= ps->num_particles)
+		return;
+
+	int dim;
+	Particle *p = &ps->particle[particleIndex];
+	floatN *nvel = &p->vel;
+	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+
+	for(dim = 0; dim < DIM;dim++){
+		float pbest =  p->best_pos.dim[dim] - p->pos.dim[dim];
+		float gbest = ps->global_best_pos.dim[dim] - p->pos.dim[dim];
+
+		nvel->dim[dim] = vel_omega*nvel->dim[dim] + best_vec_rand_coeff*vel_phi_best*pbest +
+				  global_vec_rand_coeff*vel_phi_global*gbest;
+
+		if(nvel->dim[dim] > coord_range) nvel->dim[dim] = coord_range;
+		else if (nvel->dim[dim] < -coord_range) nvel->dim[dim] = -coord_range;
+	}
+}
+...
+```
+##### **new_pos**
+La modifica apportata ha diminuito i tempi di esecuzione del 20% rispetto al precedente. L'utilizzo della shared memory non è, tuttavia, utilizzata in modo totalmente corretto e ottimale.
+```c
+...
+__global__ void new_pos(ParticleSystem *ps)
+{
+	extern __shared__ float smpos[];
+	int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	int particleIndexSHM = threadIdx.x;
+	if(particleIndex >= ps->num_particles)
+		return;
+	Particle *p = &ps->particle[particleIndex];
+
+	int i;
+	float fit1 = 0, fit2 = 0;
+	for(i = 0; i < DIM; i++){
+		smpos[particleIndexSHM] = p->pos.dim[i] + (step_factor*p->vel.dim[i]);
+		if (smpos[particleIndexSHM] > coord_max) smpos[particleIndexSHM] = coord_max;
+		else if (smpos[particleIndexSHM] < coord_min) smpos[particleIndexSHM] = coord_min;
+
+		fit1 += (smpos[particleIndexSHM] - target_pos_shared.dim[i])*(smpos[particleIndexSHM] - target_pos_shared.dim[i]);
+		fit2 += (smpos[particleIndexSHM]*smpos[particleIndexSHM]);
+		p->pos.dim[i] = smpos[particleIndexSHM];
+	}
+
+	p->fitness = fit1*(100*fit2+1)/10;
+	if (p->fitness < p->best_fit) {
+		p->best_fit = p->fitness;
+		p->best_pos = p->pos;
+	}
+}
+...
+```
