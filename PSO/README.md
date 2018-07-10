@@ -178,3 +178,57 @@ __global__ void new_pos(ParticleSystem *ps)
 }
 ...
 ```
+### main_v4.cu
+I cambiamenti fatti in questa versione sono l'unione dei kernel **new_vel** e **new_pos** per dare origine al kernel **new_vel_pos** che si occuperà di calcolare la nuova velocità e posizione di ogni particella. Il kernel utilizza la shared memory e, nel possibile, si cerca la coalescenza della memoria e di evitare i bank conflict. Inoltre vengono applicati degli accorgimenti come la direttiva ***#pragma unroll*** e il settare i parametri delle varie funzioni __restricted__ ove possibile. Le modifiche fatte hanno portato ad un boost di circa 20% rispetto alla versione precedente
+
+##### **new_vel_pos**
+Nell'unione dei due kernel, si è voluto iniziare ad usare al meglio i registri dei thread per diminuire gli accessi alla memoria globale e questo ha dato dei benefici (ad esempio, l'uso della variabile nvel ha portato un boost del 2% circa).
+```c
+...
+__global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
+{
+	extern __shared__ float smpos[];
+	const int particleIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	const int particleIndexSHM = threadIdx.x;
+	if(particleIndex >= ps->num_particles)
+		return;
+	Particle *p = &ps->particle[particleIndex];
+
+	int i;
+	float fit1 = 0, fit2 = 0;
+
+	floatN *nvel = &p->vel;
+	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
+
+	#pragma unroll
+	for(i = 0; i < DIM; i++){
+		smpos[particleIndexSHM] = p->pos.dim[i];
+		float pbest =  p->best_pos.dim[i] - smpos[particleIndexSHM];
+		float gbest = ps->global_best_pos.dim[i] - smpos[particleIndexSHM];
+
+		nvel->dim[i] = vel_omega*nvel->dim[i] + best_vec_rand_coeff*vel_phi_best*pbest +
+				  global_vec_rand_coeff*vel_phi_global*gbest;
+
+		if(nvel->dim[i] > coord_range) nvel->dim[i] = coord_range;
+		else if (nvel->dim[i] < -coord_range) nvel->dim[i] = -coord_range;
+
+		smpos[particleIndexSHM] += (step_factor*nvel->dim[i]);
+		if (smpos[particleIndexSHM] > coord_max) smpos[particleIndexSHM] = coord_max;
+		else if (smpos[particleIndexSHM] < coord_min) smpos[particleIndexSHM] = coord_min;
+
+		fit1 += (smpos[particleIndexSHM] - target_pos_shared.dim[i])*(smpos[particleIndexSHM] - target_pos_shared.dim[i]);
+		fit2 += (smpos[particleIndexSHM]*smpos[particleIndexSHM]);
+		p->pos.dim[i] = smpos[particleIndexSHM];
+	}
+
+	p->fitness = fit1*(100*fit2+1)/10;
+	if (p->fitness < p->best_fit) {
+		p->best_fit = p->fitness;
+		p->best_pos = p->pos;
+	}
+}
+...
+```
+### main_v5.cu
+I cambiamenti fatti in questa versione sono l'unione dei kernel **new_vel** e **new_pos** per dare origine al kernel **new_vel_pos** che si occuperà di calcolare la nuova velocità e posizione di ogni particella. Il kernel utilizza la shared memory e, nel possibile, si cerca la coalescenza della memoria e di evitare i bank conflict. Inoltre vengono applicati degli accorgimenti come la direttiva ***#pragma unroll*** e il settare i parametri delle varie funzioni __restricted__ ove possibile. Le modifiche fatte hanno portato ad un boost di circa 20% rispetto alla versione precedente
