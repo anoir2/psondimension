@@ -11,7 +11,38 @@ Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm 
 ## Implementazione
 ### main_v2.cu
 Partendo da una versione base in C, si è provveduto ad implementare la prima versione CUDA-Based (**main_v2.cu**) creando i kernel **new_vel**, **new_pos** e **find_min_fitness_parallel**.
+#### Strutture dati utilizzate
+```c
+/* n-dimensional space */
+typedef struct floatN
+{
+	int n;
+	float dim[DIM];
+} floatN;
 
+/* A particle */
+typedef struct Particle
+{
+	floatN pos; /* particle position */
+	floatN vel; /* particle velocity */
+	floatN best_pos; /* best position so far */
+	float best_fit; /* fitness value of the best position so far */
+	float fitness; /* fitness value of the current position */
+	uint64_t prng_state; /* state of the PRNG for this particle */
+} Particle;
+
+/* The whole particle system */
+typedef struct ParticleSystem
+{
+	Particle *particle; /* array of particles */
+	floatN current_best_pos; /* best position in the whole system a this iteration */
+	floatN global_best_pos; /* best position in the whole system so far */
+	int num_particles; /* number of particles */
+	int dim_particles; /* number of dimensions */
+	float global_fitness; /* fitness value for global_best_pos */
+	float current_fitness; /* fitness value for global_best_pos */
+} ParticleSystem;
+```
 ##### **new_vel**
 Questo kernel si occupa di calcolare le nuove velocità delle varie particelle passando come parametro il riferimento alla struttura ParticleSystem che, a sua volta, contiene il riferimento al vettore particle di tipo Particle.
 ```c
