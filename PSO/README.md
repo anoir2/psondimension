@@ -231,4 +231,111 @@ __global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
 ...
 ```
 ### main_v5.cu
-I cambiamenti fatti in questa versione sono l'unione dei kernel **new_vel** e **new_pos** per dare origine al kernel **new_vel_pos** che si occuperà di calcolare la nuova velocità e posizione di ogni particella. Il kernel utilizza la shared memory e, nel possibile, si cerca la coalescenza della memoria e di evitare i bank conflict. Inoltre vengono applicati degli accorgimenti come la direttiva ***#pragma unroll*** e il settare i parametri delle varie funzioni __restricted__ ove possibile. Le modifiche fatte hanno portato ad un boost di circa 20% rispetto alla versione precedente
+I cambiamenti fatti in questa versione sono una rifattorizzazione totale della gestione delle particelle che consiste nell'eliminazione della struttura dati ParticleSystem e Particle creando dei vettori di tipo float che contenessero i valori per tutte le dimensioni, la rimozione dei cicli all'interno del kernel ***new_vel_pos***, il trasferimento del calcolo del fitness della particella è stato spostato da ***new_vel_pos*** ad un nuovo kernel di nome ***calc_fitness*** che si vede applicata una reduction dopo aver calcolato il fitness per ogni dimensione di ogni particella, tutti i kernel sono stati ottimizzati per l'uso dei registri dei thread e si è fatto un unroll nella reduction del kernel ***calc_fitness*** nella funzione ***warp_control_float2*** utilizzando l'istruzione ***#if*** a livello di precompilatore. Il boost ottenuto dalle seguenti modifiche si attesta all'incirca al 70% e si è raggiunto l'obiettivo della memory bandwith al 70%.
+
+##### **new_vel_pos**
+In questa nuova versione, il calcolo del fitness non è più presente e questo ha fatto si che tutte le ottimizzazioni applicabili per raggiungere la coalescenza di memoria fossero applicabili come un utilizzo performante della shared memory, l'uso dei registri in modo corretto e l'uso di istruzioni LOAD/STORE dalla global memory al minimo indispendabile.
+```c
+...
+__global__ void new_vel_pos()
+{
+	const int particleIndex = blockIdx.x * blockDim.y + threadIdx.y;
+	const int particleIndexDIM = particleIndex * DIM + threadIdx.x;
+	const int indexDIM = threadIdx.x;
+
+	if(particleIndex >= num_particles)
+		return;
+	uint64_t prng_state_l = prng_state[particleIndex];
+
+	const float best_vec_rand_coeff = range_rand(0, 1, &prng_state_l);
+	const float global_vec_rand_coeff = range_rand(0, 1, &prng_state_l);
+//	float velLocal = __ldg(&vel[particleIndexDIM])*vel_omega;
+//	float posLocal = __ldg(&pos[particleIndexDIM]);
+	float velLocal = vel[particleIndexDIM]*vel_omega;
+	float posLocal = pos[particleIndexDIM];
+	float pbest =  (best_pos[particleIndexDIM] - posLocal) * best_vec_rand_coeff*vel_phi_best;
+	float gbest = (global_best_pos[indexDIM] - posLocal) * global_vec_rand_coeff*vel_phi_global;
+
+	velLocal+= (pbest + gbest);
+
+	if(velLocal > coord_range) velLocal = coord_range;
+	else if (velLocal < -coord_range) velLocal = -coord_range;
+
+	posLocal += (step_factor*velLocal);
+	if (posLocal > coord_max) posLocal = coord_max;
+	else if (posLocal < coord_min) posLocal = coord_min;
+
+	pos[particleIndexDIM] = posLocal;
+	vel[particleIndexDIM] = velLocal;
+	prng_state[particleIndex] = prng_state_l;
+}
+...
+```
+
+##### **calc_fitness**
+Il seguente kernel, come precedentemente detto, è nato dalla necessità di ottimizzare il calcolo delle velocità/posizioni delle particelle e il calcolo dei vari fitness. Questo kernel si occupa del calcolo del fitness di ogni componente di ogni particella e della loro somma tramite una reduction. Successivamente controlla se il best fitness locale è maggiore di quello appena calcolato e, se cosi fosse, procede a copiare il vettore delle posizioni attuale come quello migliore.
+```c
+...
+__global__ void calc_fitness()
+{
+	extern __shared__ float2 smpos[];
+	const int particleIndex = blockIdx.x * blockDim.y + threadIdx.y;
+	const int particleIndexSHM = threadIdx.y * blockDim.x + threadIdx.x;
+	const int particleIndexDIM = particleIndex * DIM + threadIdx.x;
+	const int indexDIM = threadIdx.x;
+
+	if(particleIndex >= num_particles)
+		return;
+
+	float posLocal = pos[particleIndexDIM];
+	smpos[particleIndexSHM].x = (posLocal - target_pos_shared[indexDIM])*(posLocal - target_pos_shared[indexDIM]);
+	smpos[particleIndexSHM].y = (posLocal*posLocal);
+
+	warp_control_float2(smpos,particleIndexSHM);
+
+	if (indexDIM==0){
+		float fitness = smpos[particleIndexSHM].x*(100*smpos[particleIndexSHM].y+1)/10;
+		fitness_val[particleIndex] = fitness;
+		if (fitness < best_fit[particleIndex]) {
+			best_fit[particleIndex] = fitness;
+			memcpy(best_pos + particleIndex,pos + particleIndex,sizeof(float)*DIM);
+		}
+	}
+}
+...
+```
+### main_v6.cu
+I cambiamenti fatti in questa versione sono la parallelizzazione della funzione memcpy all'interno del kernel ***calc_fitness***. La modifica fatta ha portato un boost al kernel del 70%.
+
+##### **calc_fitness**
+Il seguente kernel, come precedentemente detto, è nato dalla necessità di ottimizzare il calcolo delle velocità/posizioni delle particelle e il calcolo dei vari fitness. Questo kernel si occupa del calcolo del fitness di ogni componente di ogni particella e della loro somma tramite una reduction. Successivamente controlla se il best fitness locale è maggiore di quello appena calcolato e, se cosi fosse, procede a copiare il vettore delle posizioni attuale come quello migliore.
+```c
+...
+__global__ void calc_fitness()
+{
+	extern __shared__ float2 smpos[];
+	const int particleIndex = blockIdx.x * blockDim.y + threadIdx.y;
+	const int particleIndexSHM = threadIdx.y * blockDim.x + threadIdx.x;
+	const int particleIndexDIM = particleIndex * DIM + threadIdx.x;
+	const int indexDIM = threadIdx.x;
+
+	if(particleIndex >= num_particles)
+		return;
+
+	float posLocal = pos[particleIndexDIM];
+	smpos[particleIndexSHM].x = (posLocal - target_pos_shared[indexDIM])*(posLocal - target_pos_shared[indexDIM]);
+	smpos[particleIndexSHM].y = (posLocal*posLocal);
+
+	warp_control_float2(smpos,particleIndexSHM, indexDIM);
+
+	if (indexDIM==0){
+		fitness_val[particleIndex] = smpos[particleIndexSHM].x*(100*smpos[particleIndexSHM].y+1)/10;
+	}
+	__syncthreads();
+	if (fitness_val[particleIndex] < best_fit[particleIndex]) {
+		best_fit[particleIndex] = fitness_val[particleIndex];
+		memcpy(best_pos + particleIndexDIM,pos + particleIndexDIM,sizeof(float));
+	}
+}
+...
+```
