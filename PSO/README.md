@@ -8,6 +8,64 @@ ___
 ## Overview
 Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm Optimization. Introdotta da James Kennedy e Russell Eberhart nel 1995 e sviluppata ampiamente nel 2001 come metodo per l’ottimizzazione di funzioni non lineari continue, si ispira alla simulazione di un modello sociale semplificato (lo stormo = flock, o meglio ancora lo sciame = swarm). La seguente implementazione prevede un sistema di N particelle con M dimensioni che si muoveranno con una velocità randomica. La funzione di fitness calcola la distanza euclidea tra le N particelle e il target finale e quando andrà sotto la soglia da noi impostata, si può dire che l'algoritmo sia concluso. Nel file RESULTS.md si trova l'output generato da nvprof.
 
+## Tempi di esecuzione medio
+
+### [INPUT 2 DIM, ONE MILION PARTICLES]
+
+| nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
+|-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
+|   main_v2   | 3.9278ms  | 2.9533ms  | 	6.1650us	    | 						      |
+|   main_v3   | 1.9932ms  | 2.7887ms  | 	6.7950us	    |  						      |
+|   main_v4   |	   ->     | 3.7182ms  | 	168.87us            | unione tra new_vel e new_pos che da new_vel_pos |
+|   main_v5   |	   ->     | 2,2955ms  | 	284.43us	    |    scorporamento calc_fitness da new_vel_pos    |
+|   main_v6   |	   ->     | 1,9139ms  | 	284.02us	    |  						      |
+|   main_v7   |	   ->     | 4,1953ms  | 	284.53us	    |  						      |
+
+### [INPUT 8 DIM, ONE MILION PARTICLES]
+
+| nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
+|-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
+|   main_v2   | 2.8925ms  | 4.0275ms  | 	6.1350us	    | 						      |
+|   main_v3   | 2.0646ms  | 2.7416ms  | 	6.7790us	    |  						      |
+|   main_v4   |	   ->     | 3.6341ms  | 	168.66us            | unione tra new_vel e new_pos che da new_vel_pos |
+|   main_v5   |	   ->     | 7,0595ms  | 	264.85us	    |    scorporamento calc_fitness da new_vel_pos    |
+|   main_v6   |	   ->     | 8,6756ms  | 	284.02us	    |  						      |
+|   main_v7   |	   ->     | 3,9537ms  | 	263.86us	    |  						      |
+
+### [INPUT 16 DIM, ONE MILION PARTICLES]
+
+| nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
+|-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
+|   main_v2   | 30.674ms  | 16.824ms  | 	6.2140us	    | 						      |
+|   main_v3   | 42.211ms  | 30.987ms  | 	6.7950us	    |  						      |
+|   main_v4   |	   ->     | 74.422ms  | 	199.25us            | unione tra new_vel e new_pos che da new_vel_pos |
+|   main_v5   |	   ->     | 14,951ms  | 	266.87us	    |    scorporamento calc_fitness da new_vel_pos    |
+|   main_v6   |	   ->     | 14,673ms  | 	270.76us	    |  						      |
+|   main_v7   |	   ->     | 6,8537ms  | 	266.15us	    |  						      |
+
+### [INPUT 32 DIM, ONE MILION PARTICLES]
+
+| nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
+|-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
+|   main_v2   | 105.47ms  | 54.639ms  | 	7.9720us	    | 						      |
+|   main_v3   | 56.252ms  | 32.369ms  | 	7.0750us	    |  						      |
+|   main_v4   |	   ->     | 112.92ms  | 	232.88us            | unione tra new_vel e new_pos che da new_vel_pos |
+|   main_v5   |	   ->     | 29,013ms  | 	271.94us	    |    scorporamento calc_fitness da new_vel_pos    |
+|   main_v6   |	   ->     | 28,792ms  | 	273.62us	    |  						      |
+|   main_v7   |	   ->     | 13,637ms  | 	271.97us	    |  						      |
+
+### [INPUT 64 DIM, ONE MILION PARTICLES]
+
+| nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
+|-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
+|   main_v2   | 164.92ms  | 116.74ms  | 	9.5650us	    | 						      |
+|   main_v3   | 119.86ms  | 97.727ms  | 	9.7110us	    |  						      |
+|   main_v4   |	   ->     | 251.05ms  | 	348.98us            | unione tra new_vel e new_pos che da new_vel_pos |
+|   main_v5   |	   ->     | 58,602ms  | 	286.33us	    |    scorporamento calc_fitness da new_vel_pos    |
+|   main_v6   |	   ->     | 56,946ms  | 	299.18us	    |  						      |
+|   main_v7   |	   ->     | 27,659ms  | 	285.62us	    |  						      |
+
+
 ## Implementazione
 ### main_v2.cu
 Partendo da una versione base in C, si è provveduto ad implementare la prima versione CUDA-Based (**main_v2.cu**) creando i kernel **new_vel**, **new_pos** e **find_min_fitness_parallel**.
