@@ -37,7 +37,7 @@ Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm 
 | nome_kernel |  new_vel  |  new_pos  |  find_min_fitness_parallel  |			    note		      |
 |-------------|-----------|-----------|-----------------------------|-------------------------------------------------|
 |   main_v2   | 30.674ms  | 16.824ms  | 	6.2140us	    | 						      |
-|   main_v3   | 42.211ms  | 30.987ms  | 	6.7950us	    |  						      |
+|   main_v3   | 15.742ms  | 13.967ms  | 	6.7950us	    |  						      |
 |   main_v4   |	   ->     | 74.422ms  | 	199.25us            | unione tra new_vel e new_pos che da new_vel_pos |
 |   main_v5   |	   ->     | 14,951ms  | 	266.87us	    |    scorporamento calc_fitness da new_vel_pos    |
 |   main_v6   |	   ->     | 14,673ms  | 	270.76us	    |  						      |
@@ -69,6 +69,9 @@ Il seguente repository contiene l'implementazione dell'algoritmo Particle Swarm 
 ## Implementazione
 ### main_v2.cu
 Partendo da una versione base in C, si è provveduto ad implementare la prima versione CUDA-Based (**main_v2.cu**) creando i kernel **new_vel**, **new_pos** e **find_min_fitness_parallel**.
+
+La formula usata per indicare il boost di prestazioni sarà ((oldTime - newTime)/oldTime)*100.
+
 #### Strutture dati utilizzate
 ```c
 /* n-dimensional space */
@@ -159,7 +162,7 @@ __global__ void new_pos(ParticleSystem *ps)
 ...
 ```
 ##### **find_min_fitness_parallel**
-Questo kernel si occupa di trovare il fitness minimo calcolato nella iterazione corrente. L'idea di scorporare new_pos e questo kernel è dovuta ad un boost di prestazioni non indifferenti applicando una reduction iterativa, cosa che non sarebbe stata possibile (o molto più limitata) se i due kernel fossero stati lasciati come un unico solo. Al kernel verrà passato come parametro il riferimento alla struttura ParticleSystem che, a sua volta, contiene il riferimento al vettore particle di tipo Particle, il parametro ***in*** che servirà per le riduzioni successive alla prima (visto che per la prima riduzione, prenderemo i fitness direttamente dal puntatore ps->particle), il parametro ***out*** che conterrà i minimi locali per ogni blocco da dare in input alla prossima iterazione, il parametro ***offset*** utile a capire quale particella è stata elaborata, il parametro ***n_in*** che ci dirà quanti sono i valori nel vettore in e il parametro ***blocks*** che, arrivato a 1, ci dirà che siamo alla iterazione finale. 
+Questo kernel si occupa di trovare il fitness minimo calcolato nella iterazione corrente. L'idea di scorporare new_pos e questo kernel è dovuta ad un boost di prestazioni non indifferenti applicando una reduction iterativa, cosa che non sarebbe stata possibile (o molto più limitata) se i due kernel fossero stati lasciati come un unico solo. Per ottimizzare al meglio la reduction, si è resa necessario l'utilizzo della shared memory, in modo tale da non allocare ulteriore spazio nella GDRAM e, allo stesso tempo, avere tempi di accesso di memoria inferiori. La dimensione della shared memory verrà stabilita all'invocazione del kernel.Inoltre, al kernel verrà passato come parametro il riferimento alla struttura ParticleSystem che, a sua volta, contiene il riferimento al vettore particle di tipo Particle, il parametro ***in*** che servirà per le riduzioni successive alla prima (visto che per la prima riduzione, prenderemo i fitness direttamente dal puntatore ps->particle), il parametro ***out*** che conterrà i minimi locali per ogni blocco da dare in input alla prossima iterazione, il parametro ***offset*** utile a capire quale particella è stata elaborata, il parametro ***n_in*** che ci dirà quanti sono i valori nel vettore in e il parametro ***blocks*** che, arrivato a 1, ci dirà che siamo alla iterazione finale. 
 ```c
 ...
 __global__ void find_min_fitness_parallel(ParticleSystem *ps, fitness_pos* in, fitness_pos* out, int offset, int n_in, int blocks){
@@ -203,10 +206,10 @@ __global__ void find_min_fitness_parallel(ParticleSystem *ps, fitness_pos* in, f
 ...
 ```
 ### main_v3.cu
-I cambiamenti fatti in questa versione sono la trasformazione di tutte le variabili costanti in ***#DEFINE***, la modifica della funzione ***new_vel*** mettendo la gestione delle dimensioni di una singola particella all'interno di un ciclo for e aggiungendo la shared memory al kernel ***new_pos***. La trasformazione di tutte le costanti in ***#DEFINE*** ha rimosso i tempi di lettura da parte dei 3 kernel facendo si che ci fosse un boost generale delle prestazioni del 40%. 
+I cambiamenti fatti in questa versione sono la trasformazione di tutte le variabili costanti in ***#DEFINE***, la modifica della funzione ***new_vel*** mettendo la gestione delle dimensioni di una singola particella all'interno di un ciclo for e aggiungendo la shared memory al kernel ***new_pos***. La trasformazione di tutte le costanti in ***#DEFINE*** ha rimosso i tempi di lettura da parte dei 3 kernel facendo si che ci fosse un boost generale delle prestazioni del 30%. 
 
 ##### **new_vel**
-Spostando la gestione delle dimensioni, per ogni singola particella, dentro il kernel new_vel, ha diminuito i tempi di esecuzione del 30% rispetto al precedente.
+Spostando la gestione delle dimensioni per ogni singola particella dentro il kernel new_vel, ha diminuito i tempi di esecuzione del 28-49% rispetto al precedente (dipende dalle dimensioni usate). Utilizzando 64 thread a blocco e accentrando la logica di elaborazione dentro il kernel, la velocità di esecuzione è nettamente migliorata. Questo boost, molto probabilmente, sarà dovuto ad una cattiva gestione della versione precedente dei blocchi/threads usati parallelamente, visto che, comunque, viene utilizzata una logica seriale che andrebbe assolutamente evitata, ove possibile, dentro un kernel poiché la GPU non è pensata a tale scopo.
 ```c
 ...
 __global__ void new_vel(ParticleSystem *ps)
@@ -235,7 +238,7 @@ __global__ void new_vel(ParticleSystem *ps)
 ...
 ```
 ##### **new_pos**
-La modifica apportata ha diminuito i tempi di esecuzione del 20% rispetto al precedente. L'utilizzo della shared memory non è, tuttavia, utilizzata in modo totalmente corretto e ottimale.
+La modifica apportata ha diminuito i tempi di esecuzione del 5-16% rispetto al precedente. L'unica anomalia è stata riscontrata utilizzando 16 dimensioni, dove abbiamo una perdita del 40% rispetto alla versione precedente. Tuttavia, la shared memory non è utilizzata in modo totalmente corretto e ottimale poiché, visto il numero basso di registri presenti, non è necessario utilizzarla per diminuire le richieste alla global memory e sarebbe stata una strategia migliore puntare sull'uso ottimale dei registri.
 ```c
 ...
 __global__ void new_pos(ParticleSystem *ps)
@@ -268,10 +271,10 @@ __global__ void new_pos(ParticleSystem *ps)
 ...
 ```
 ### main_v4.cu
-I cambiamenti fatti in questa versione sono l'unione dei kernel **new_vel** e **new_pos** per dare origine al kernel **new_vel_pos** che si occuperà di calcolare la nuova velocità e posizione di ogni particella. Il kernel utilizza la shared memory e, nel possibile, si cerca la coalescenza della memoria e di evitare i bank conflict. Inoltre vengono applicati degli accorgimenti come la direttiva ***#pragma unroll*** e il settare i parametri delle varie funzioni __restricted__ ove possibile. Le modifiche fatte hanno portato ad un boost di circa 20% rispetto alla versione precedente
+I cambiamenti fatti in questa versione sono l'unione dei kernel **new_vel** e **new_pos** per dare origine al kernel **new_vel_pos** che si occuperà di calcolare la nuova velocità e posizione di ogni particella. Il kernel utilizza la shared memory e, nel possibile, si cerca la coalescenza della memoria e di evitare i bank conflict. Inoltre vengono applicati degli accorgimenti come la direttiva ***#pragma unroll*** e il settare i parametri delle varie funzioni __restricted__ ove possibile. Le modifiche fatte hanno portato ad un boost di  5-22% rispetto alla versione precedente per le dimensioni inferiori a 16 mentre hanno portato ad un decrease delle prestazioni del 15-27% per le dimensioni maggiori di 16.
 
 ##### **new_vel_pos**
-Nell'unione dei due kernel, si è voluto iniziare ad usare al meglio i registri dei thread per diminuire gli accessi alla memoria globale e questo ha dato dei benefici (ad esempio, l'uso della variabile nvel ha portato un boost del 2% circa).
+Nell'unione dei due kernel, si è voluto iniziare ad usare al meglio i registri dei thread per diminuire gli accessi alla memoria globale e sfruttare al meglio i tempi del for accorpandoli insieme in modo tale che non facesse due cicli separati in due kernel diversi. Come descritto precedentemente, questa strategia ha portato questo kernel ad avere un boost del 5-22% com DIM <= 16 e un decrease delle prestazioni del 15-27% con DIM > 16. Tuttavia, sono ancora presenti molti LOAD/STORE dalla Global Memory e accesso di memoria non coalescente dove, per grandi DIM, porterà ad influire nelle prestazione dell'algoritmo.
 ```c
 ...
 __global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
@@ -290,7 +293,7 @@ __global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
 	const float best_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 	const float global_vec_rand_coeff = range_rand(0, 1, &p->prng_state);
 
-	#pragma unroll
+	#pragma unroll DIM
 	for(i = 0; i < DIM; i++){
 		smpos[particleIndexSHM] = p->pos.dim[i];
 		float pbest =  p->best_pos.dim[i] - smpos[particleIndexSHM];
@@ -320,10 +323,10 @@ __global__ void new_vel_pos(__restrict__ ParticleSystem *ps)
 ...
 ```
 ### main_v5.cu
-I cambiamenti fatti in questa versione sono una rifattorizzazione totale della gestione delle particelle che consiste nell'eliminazione della struttura dati ParticleSystem e Particle creando dei vettori di tipo float che contenessero i valori per tutte le dimensioni, la rimozione dei cicli all'interno del kernel ***new_vel_pos***, il trasferimento del calcolo del fitness della particella è stato spostato da ***new_vel_pos*** ad un nuovo kernel di nome ***calc_fitness*** che si vede applicata una reduction dopo aver calcolato il fitness per ogni dimensione di ogni particella, tutti i kernel sono stati ottimizzati per l'uso dei registri dei thread e si è fatto un unroll nella reduction del kernel ***calc_fitness*** nella funzione ***warp_control_float2*** utilizzando l'istruzione ***#if*** a livello di precompilatore. Il boost ottenuto dalle seguenti modifiche si attesta all'incirca al 70% e si è raggiunto l'obiettivo della memory bandwith al 70%.
+I cambiamenti fatti in questa versione sono una rifattorizzazione totale della gestione delle particelle che consiste nell'eliminazione della struttura dati ParticleSystem e Particle creando dei vettori di tipo float che contenessero i valori per tutte le dimensioni, la rimozione dei cicli all'interno del kernel ***new_vel_pos***, il trasferimento del calcolo del fitness della particella è stato spostato da ***new_vel_pos*** ad un nuovo kernel di nome ***calc_fitness*** che si vede applicata una reduction dopo aver calcolato il fitness per ogni dimensione di ogni particella, tutti i kernel sono stati ottimizzati per l'uso dei registri dei thread e si è fatto un unroll nella reduction del kernel ***calc_fitness*** nella funzione ***warp_control_float2*** utilizzando l'istruzione ***#if*** a livello di precompilatore. Il boost ottenuto dalle seguenti modifiche si attesta all'incirca al 38-76% (in base alle dimensioni utilizzate) e si è raggiunto l'obiettivo della memory bandwith al 70%.
 
 ##### **new_vel_pos**
-In questa nuova versione, il calcolo del fitness non è più presente e questo ha fatto si che tutte le ottimizzazioni applicabili per raggiungere la coalescenza di memoria fossero applicabili come un utilizzo performante della shared memory, l'uso dei registri in modo corretto e l'uso di istruzioni LOAD/STORE dalla global memory al minimo indispendabile.
+In questa nuova versione, il calcolo del fitness non è più presente e questo, unito ad una gestione ottimale e corretta dei registri, unito dal LOAD sequenziale dei dati dalla global memory nei warp dei thread e ad una parallelizzazione adeguata dei kernel, possibile grazie allo spostamento del calcolo del fitness in un altro kernel e al cambio del tipo dei dati, ha portato ad avere un ampio margine di miglioramento nelle prestazioni. Nella versione precedente, il grande collo di bottiglia era la strutturazione dei dati in strutture che non permettevano al kernel di avere una memory bandwith ottimale poiché la contiguità in memoria era per la singola particella e non per componente. Infatti questa nuova versione presenta i componenti velocità, posizione allocati come vettori a se stanti e contigui. Oltre alla struttura dati, un altro collo di bottiglia era il ciclo che serviva a scorrere le varie dimensioni poiché, come spiegato precedentemente, la GPU deve parallelizzare una serie di calcoli quanto più semplici possibili.   
 ```c
 ...
 __global__ void new_vel_pos()
@@ -362,7 +365,7 @@ __global__ void new_vel_pos()
 ```
 
 ##### **calc_fitness**
-Il seguente kernel, come precedentemente detto, è nato dalla necessità di ottimizzare il calcolo delle velocità/posizioni delle particelle e il calcolo dei vari fitness. Questo kernel si occupa del calcolo del fitness di ogni componente di ogni particella e della loro somma tramite una reduction. Successivamente controlla se il best fitness locale è maggiore di quello appena calcolato e, se cosi fosse, procede a copiare il vettore delle posizioni attuale come quello migliore.
+Il seguente kernel, come precedentemente detto, è nato dalla necessità di ottimizzare il calcolo delle velocità/posizioni delle particelle e il calcolo dei vari fitness. Questo kernel si occupa del calcolo del fitness di ogni componente di ogni particella e della loro somma tramite una reduction. Successivamente controlla se il best fitness locale è maggiore di quello appena calcolato e, se cosi fosse, procede a copiare il vettore delle posizioni attuale, tramite l'istruzione memcpy, come quello migliore. La shared memory viene utilizzata per sommare le varie componenti locali utili al calcolo finale del fitness. La funzione warp_control_float2 "srotola" il ciclo che si occupa della reduction per aumentare ancora di più la bandwith di memoria.
 ```c
 ...
 __global__ void calc_fitness()
@@ -394,10 +397,10 @@ __global__ void calc_fitness()
 ...
 ```
 ### main_v6.cu
-I cambiamenti fatti in questa versione sono la parallelizzazione della funzione memcpy all'interno del kernel ***calc_fitness***. La modifica fatta ha portato un boost al kernel del 70%.
+I cambiamenti fatti in questa versione sono la parallelizzazione della funzione memcpy all'interno del kernel ***calc_fitness***. La modifica fatta ha portato un boost al kernel del 3-17%.
 
 ##### **calc_fitness**
-Il seguente kernel, come precedentemente detto, è nato dalla necessità di ottimizzare il calcolo delle velocità/posizioni delle particelle e il calcolo dei vari fitness. Questo kernel si occupa del calcolo del fitness di ogni componente di ogni particella e della loro somma tramite una reduction. Successivamente controlla se il best fitness locale è maggiore di quello appena calcolato e, se cosi fosse, procede a copiare il vettore delle posizioni attuale come quello migliore.
+Il cambiamento fatto in questa versione consiste nell'aver parallelizzato il memcpy in modo tale da non lasciare che un thread, per ogni blocco, rimanga in attesa che la copia di tutti i componenti della best position finisca. Si è preferito utilizzare tutti i thread per la fase di copia, in modo tale che il singolo thread, che elabora la y dimensione della particella x, possa copiare il suo corrispettivo dalla propria posizione nel vettore pos al vettore best_pos della particella x.
 ```c
 ...
 __global__ void calc_fitness()
