@@ -431,3 +431,6 @@ __global__ void calc_fitness()
 }
 ...
 ```
+
+### main_v7.cu
+I cambiamenti fatti in questa versione sono una rifattorizzazione totale della gestione delle particelle che consiste nel passare dal tipo float al tipo float4. Per DIM >= 8, il boost è stato del 51-56% mentre per DIM < 8 c'è un decrease delle prestazioni del 54%. Il cambio di tipo ha permesso una lettura sequenziale della global memory migliore rispetto alla versione precedente portando la memory bandwith all'87%, 17% in più rispetto alla versione precedente. 
