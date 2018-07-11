@@ -366,29 +366,30 @@ ______
 
 ##### main_v3.cu
 ```
-==4966== Profiling result:
+==7228== Profiling result:
             Type  Time(%)      Time     Calls       Avg       Min       Max  Name
- GPU activities:   56.61%  5.86732s       139  42.211ms  39.833ms  44.945ms  new_vel(ParticleSystem*)
-                   41.56%  4.30721s       139  30.987ms  26.907ms  37.443ms  new_pos(ParticleSystem*)
-                    1.48%  153.89ms     23100  6.6610us  3.6800us  9.1200us  find_min_fitness_parallel(ParticleSystem*, fitness_pos*, fitness_pos*, int, int, int)
-                    0.34%  35.632ms         1  35.632ms  35.632ms  35.632ms  init_particle(ParticleSystem*)
-                    0.00%  312.58us       140  2.2320us  1.7280us  2.6880us  [CUDA memcpy DtoH]
-                    0.00%  2.0800us         2  1.0400us     608ns  1.4720us  [CUDA memcpy HtoD]
-      API calls:   91.65%  10.6568s       417  25.556ms  6.8680us  45.906ms  cudaEventSynchronize
-                    3.59%  417.76ms       422  989.96us  7.1610us  37.420ms  cudaFree
-                    2.27%  264.41ms     23379  11.309us  6.0330us  684.91us  cudaLaunchKernel
-                    1.90%  221.40ms         1  221.40ms  221.40ms  221.40ms  cudaMemcpyToSymbol
-                    0.47%  54.974ms       422  130.27us  11.558us  1.1126ms  cudaMalloc
-                    0.04%  4.4028ms       141  31.225us  25.041us  36.978us  cudaMemcpy
-                    0.03%  3.9472ms       834  4.7320us  2.2350us  13.518us  cudaEventRecord
-                    0.02%  1.9897ms       834  2.3850us     967ns  5.7470us  cudaEventCreate
-                    0.01%  1.3117ms       417  3.1450us  1.7250us  8.2790us  cudaEventElapsedTime
-                    0.01%  759.68us        96  7.9130us     399ns  325.93us  cuDeviceGetAttribute
-                    0.00%  106.99us         1  106.99us  106.99us  106.99us  cuDeviceTotalMem
-                    0.00%  87.812us         1  87.812us  87.812us  87.812us  cuDeviceGetName
-                    0.00%  5.5640us         1  5.5640us  5.5640us  5.5640us  cuDeviceGetPCIBusId
-                    0.00%  2.5610us         2  1.2800us     844ns  1.7170us  cuDeviceGetCount
-                    0.00%  1.3350us         2     667ns     525ns     810ns  cuDeviceGet
+ GPU activities:   50.83%  2.14087s       136  15.742ms  15.288ms  20.642ms  new_vel(ParticleSystem*)
+                   45.10%  1.89949s       136  13.967ms  13.393ms  18.358ms  new_pos(ParticleSystem*)
+                    3.55%  149.36ms     22605  6.6070us  3.3600us  8.8960us  find_min_fitness_parallel(ParticleSystem*, fitness_pos*, fitness_pos*, int, int, int)
+                    0.51%  21.632ms         1  21.632ms  21.632ms  21.632ms  init_particle(ParticleSystem*)
+                    0.01%  221.31us       137  1.6150us  1.5680us  1.9840us  [CUDA memcpy DtoH]
+                    0.00%  2.5920us         2  1.2960us  1.2160us  1.3760us  [CUDA memcpy HtoD]
+      API calls:   90.87%  4.04407s       408  9.9119ms  4.9090us  20.650ms  cudaEventSynchronize
+                    3.73%  165.89ms       411  403.63us  4.0390us  22.498ms  cudaFree
+                    2.37%  105.44ms     22879  4.6080us  4.0200us  312.88us  cudaLaunchKernel
+                    2.12%  94.516ms         1  94.516ms  94.516ms  94.516ms  cudaMemcpyToSymbol
+                    0.68%  30.387ms       413  73.577us  6.2900us  1.0260ms  cudaMalloc
+                    0.14%  6.0294ms       138  43.691us  13.109us  706.53us  cudaMemcpy
+                    0.03%  1.5179ms       818  1.8550us  1.1400us  6.5370us  cudaEventRecord
+                    0.02%  884.24us        96  9.2100us     260ns  408.02us  cuDeviceGetAttribute
+                    0.02%  768.23us       818     939ns     461ns  14.434us  cudaEventCreate
+                    0.01%  497.37us       408  1.2190us     896ns  2.6470us  cudaEventElapsedTime
+                    0.01%  393.80us         1  393.80us  393.80us  393.80us  cuDeviceGetName
+                    0.00%  107.19us         1  107.19us  107.19us  107.19us  cuDeviceTotalMem
+                    0.00%  2.7780us         2  1.3890us     905ns  1.8730us  cuDeviceGetCount
+                    0.00%  2.4970us         1  2.4970us  2.4970us  2.4970us  cuDeviceGetPCIBusId
+                    0.00%  1.0780us         2     539ns     425ns     653ns  cuDeviceGet
+
 ```
 
 ##### main_v4.cu
