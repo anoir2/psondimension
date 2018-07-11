@@ -499,59 +499,60 @@ ______
 
 ##### main_v5.cu
 ```
-==6476== Profiling result:
+==5785== Profiling result:
             Type  Time(%)      Time     Calls       Avg       Min       Max  Name
- GPU activities:   41.02%  158.96ms       253  628.29us  605.47us  678.30us  new_vel_pos(void)
-                   36.84%  142.77ms       508  281.04us  25.535us  561.79us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
-                   13.29%  51.491ms         1  51.491ms  51.491ms  51.491ms  init_particle(void)
-                    8.46%  32.804ms       253  129.66us  94.047us  778.71us  calc_fitness(void)
-                    0.39%  1.5183ms       762  1.9920us     800ns  6.3040us  [CUDA memcpy DtoH]
-                    0.00%  12.320us        10  1.2320us  1.2160us  1.3440us  [CUDA memcpy HtoD]
-      API calls:   32.72%  237.83ms       516  460.90us  4.8760us  180.43ms  cudaMalloc
-                   31.89%  231.80ms       508  456.29us  5.2520us  52.036ms  cudaFree
-                   29.35%  213.31ms       759  281.04us  3.9710us  1.1952ms  cudaEventSynchronize
-                    3.76%  27.363ms       762  35.908us  7.7920us  96.314us  cudaMemcpy
-                    1.26%  9.1759ms      1015  9.0400us  5.0730us  25.635us  cudaLaunchKernel
-                    0.38%  2.7330ms      1518  1.8000us  1.0640us  16.721us  cudaEventRecord
-                    0.31%  2.2425ms      1518  1.4770us     451ns  16.225us  cudaEventCreate
-                    0.11%  823.49us        96  8.5780us     214ns  396.08us  cuDeviceGetAttribute
-                    0.11%  767.40us       759  1.0110us     783ns  11.863us  cudaEventElapsedTime
-                    0.06%  403.91us         1  403.91us  403.91us  403.91us  cuDeviceGetName
-                    0.03%  190.42us      1016     187ns     130ns     450ns  cudaGetSymbolAddress
-                    0.01%  97.659us         1  97.659us  97.659us  97.659us  cuDeviceTotalMem
-                    0.01%  96.484us        10  9.6480us  9.1020us  13.576us  cudaMemcpyToSymbol
-                    0.00%  2.9580us         2  1.4790us     940ns  2.0180us  cuDeviceGetCount
-                    0.00%  2.5110us         1  2.5110us  2.5110us  2.5110us  cuDeviceGetPCIBusId
-                    0.00%     962ns         2     481ns     353ns     609ns  cuDeviceGet
+ GPU activities:   54.99%  24.5096s      1506  16.275ms  14.819ms  74.353ms  calc_fitness(void)
+                   43.04%  19.1836s      1506  12.738ms  12.178ms  15.270ms  new_vel_pos(void)
+                    1.84%  819.64ms      3014  271.94us  25.440us  559.14us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
+                    0.11%  50.788ms         1  50.788ms  50.788ms  50.788ms  init_particle(void)
+                    0.02%  8.8393ms      4521  1.9550us     832ns  8.1280us  [CUDA memcpy DtoH]
+                    0.00%  12.288us        10  1.2280us  1.2160us  1.3440us  [CUDA memcpy HtoD]
+      API calls:   95.81%  43.8332s      4518  9.7019ms  1.4210us  74.364ms  cudaEventSynchronize
+                    2.41%  1.10272s      3014  365.87us  5.4550us  51.326ms  cudaFree
+                    1.19%  543.03ms      3022  179.69us  5.0550us  180.67ms  cudaMalloc
+                    0.35%  158.91ms      4521  35.149us  9.1490us  322.34us  cudaMemcpy
+                    0.15%  67.876ms      6028  11.260us  5.5250us  393.78us  cudaLaunchKernel
+                    0.04%  19.652ms      9038  2.1740us  1.1710us  308.53us  cudaEventRecord
+                    0.03%  13.159ms      9038  1.4550us     460ns  34.639us  cudaEventCreate
+                    0.01%  6.3529ms      4518  1.4060us     892ns  12.800us  cudaEventElapsedTime
+                    0.00%  1.5781ms      6028     261ns     134ns  10.374us  cudaGetSymbolAddress
+                    0.00%  851.95us        96  8.8740us     242ns  425.86us  cuDeviceGetAttribute
+                    0.00%  410.12us         1  410.12us  410.12us  410.12us  cuDeviceGetName
+                    0.00%  111.34us         1  111.34us  111.34us  111.34us  cuDeviceTotalMem
+                    0.00%  96.491us        10  9.6490us  8.7540us  14.055us  cudaMemcpyToSymbol
+                    0.00%  3.0140us         1  3.0140us  3.0140us  3.0140us  cuDeviceGetPCIBusId
+                    0.00%  2.3240us         2  1.1620us     556ns  1.7680us  cuDeviceGetCount
+                    0.00%  1.0400us         2     520ns     346ns     694ns  cuDeviceGet
 
 ```
 
 ##### main_v6.cu
 ```
-==6706== Profiling result:
+==5898== Profiling result:
             Type  Time(%)      Time     Calls       Avg       Min       Max  Name
- GPU activities:   49.79%  481.94ms       689  699.48us  692.70us  728.06us  new_vel_pos(void)
-                   38.77%  375.26ms      1380  271.93us  25.472us  522.43us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
-                    6.22%  60.218ms       689  87.398us  81.663us  134.65us  calc_fitness(void)
-                    4.80%  46.458ms         1  46.458ms  46.458ms  46.458ms  init_particle(void)
-                    0.42%  4.0361ms      2070  1.9490us     896ns  7.6480us  [CUDA memcpy DtoH]
-                    0.00%  12.224us        10  1.2220us  1.1840us  1.3440us  [CUDA memcpy HtoD]
-      API calls:   40.25%  591.05ms      2067  285.95us  1.8890us  1.1656ms  cudaEventSynchronize
-                   36.29%  532.84ms      1380  386.11us  5.3740us  46.948ms  cudaFree
-                   15.45%  226.88ms      1388  163.45us  5.1190us  78.146ms  cudaMalloc
-                    4.93%  72.332ms      2070  34.942us  8.3160us  94.797us  cudaMemcpy
-                    1.86%  27.313ms      2759  9.8990us  4.5630us  26.011us  cudaLaunchKernel
-                    0.49%  7.2477ms      4134  1.7530us  1.0050us  301.08us  cudaEventRecord
-                    0.46%  6.8229ms      4134  1.6500us     429ns  36.224us  cudaEventCreate
-                    0.14%  2.0621ms      2067     997ns     789ns  11.788us  cudaEventElapsedTime
-                    0.06%  884.40us        96  9.2120us     255ns  462.18us  cuDeviceGetAttribute
-                    0.04%  538.01us      2760     194ns     135ns  10.555us  cudaGetSymbolAddress
-                    0.01%  113.54us         1  113.54us  113.54us  113.54us  cuDeviceTotalMem
-                    0.01%  107.26us         1  107.26us  107.26us  107.26us  cuDeviceGetName
-                    0.01%  95.237us        10  9.5230us  8.7950us  13.241us  cudaMemcpyToSymbol
-                    0.00%  2.3810us         1  2.3810us  2.3810us  2.3810us  cuDeviceGetPCIBusId
-                    0.00%  2.2900us         2  1.1450us     526ns  1.7640us  cuDeviceGetCount
-                    0.00%     995ns         2     497ns     292ns     703ns  cuDeviceGet
+ GPU activities:   55.15%  22.2500s      1341  15.892ms  15.359ms  21.224ms  calc_fitness(void)
+                   42.88%  17.2983s      1341  12.900ms  12.190ms  16.213ms  new_vel_pos(void)
+                    1.82%  734.41ms      2684  273.62us  25.440us  560.13us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
+                    0.13%  50.630ms         1  50.630ms  50.630ms  50.630ms  init_particle(void)
+                    0.02%  7.8900ms      4026  1.9590us     832ns  13.792us  [CUDA memcpy DtoH]
+                    0.00%  12.288us        10  1.2280us  1.2160us  1.3440us  [CUDA memcpy HtoD]
+      API calls:   95.67%  39.6747s      4023  9.8620ms  1.5070us  21.235ms  cudaEventSynchronize
+                    2.49%  1.03114s      2684  384.18us  5.1700us  51.185ms  cudaFree
+                    1.22%  504.95ms      2692  187.57us  5.0560us  164.44ms  cudaMalloc
+                    0.36%  148.51ms      4026  36.887us  8.3160us  947.26us  cudaMemcpy
+                    0.16%  68.184ms      5368  12.702us  5.2090us  316.54us  cudaLaunchKernel
+                    0.05%  21.387ms      8048  2.6570us  1.1830us  311.84us  cudaEventRecord
+                    0.03%  11.523ms      8048  1.4310us     456ns  49.246us  cudaEventCreate
+                    0.02%  7.2517ms      4023  1.8020us     921ns  16.555us  cudaEventElapsedTime
+                    0.00%  2.0656ms      5368     384ns     142ns  2.1950us  cudaGetSymbolAddress
+                    0.00%  895.38us        96  9.3260us     268ns  409.04us  cuDeviceGetAttribute
+                    0.00%  399.26us         1  399.26us  399.26us  399.26us  cuDeviceGetName
+                    0.00%  109.06us         1  109.06us  109.06us  109.06us  cuDeviceTotalMem
+                    0.00%  95.195us        10  9.5190us  8.7910us  13.061us  cudaMemcpyToSymbol
+                    0.00%  2.4840us         1  2.4840us  2.4840us  2.4840us  cuDeviceGetPCIBusId
+                    0.00%  2.0890us         2  1.0440us     445ns  1.6440us  cuDeviceGetCount
+                    0.00%     937ns         2     468ns     295ns     642ns  cuDeviceGet
+
 
 ```
 ______
@@ -638,58 +639,57 @@ ______
 
 ##### main_v5.cu
 ```
-==5960== Profiling result:
+==6214== Profiling result:
             Type  Time(%)      Time     Calls       Avg       Min       Max  Name
- GPU activities:   38.79%  258.13ms       418  617.54us  606.30us  679.99us  new_vel_pos(void)
-                   36.18%  240.76ms       838  287.30us  45.503us  562.52us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
-                   19.98%  132.96ms         1  132.96ms  132.96ms  132.96ms  init_particle(void)
-                    4.65%  30.910ms       418  73.946us  33.440us  133.25us  calc_fitness(void)
-                    0.40%  2.6349ms      1257  2.0960us     832ns  7.5520us  [CUDA memcpy DtoH]
-                    0.00%  12.416us        10  1.2410us  1.1840us  1.5040us  [CUDA memcpy HtoD]
-      API calls:   42.53%  441.76ms       838  527.16us  5.3270us  133.54ms  cudaFree
-                   32.21%  334.56ms      1254  266.80us  3.7430us  2.0344ms  cudaEventSynchronize
-                   18.44%  191.47ms       846  226.32us  4.8350us  98.397ms  cudaMalloc
-                    4.32%  44.915ms      1257  35.732us  9.1600us  101.05us  cudaMemcpy
-                    1.47%  15.281ms      1675  9.1220us  4.7580us  33.592us  cudaLaunchKernel
-                    0.48%  4.9859ms      2508  1.9880us  1.0660us  13.111us  cudaEventRecord
-                    0.25%  2.5881ms      2508  1.0310us     461ns  42.721us  cudaEventCreate
-                    0.13%  1.3506ms      1254  1.0770us     832ns  10.507us  cudaEventElapsedTime
-                    0.08%  813.83us        96  8.4770us     235ns  354.14us  cuDeviceGetAttribute
-                    0.03%  337.71us      1676     201ns     132ns     618ns  cudaGetSymbolAddress
-                    0.02%  205.61us         1  205.61us  205.61us  205.61us  cuDeviceGetName
-                    0.02%  181.65us         1  181.65us  181.65us  181.65us  cuDeviceTotalMem
-                    0.01%  141.39us        10  14.139us  8.5490us  55.468us  cudaMemcpyToSymbol
-                    0.00%  2.5120us         1  2.5120us  2.5120us  2.5120us  cuDeviceGetPCIBusId
-                    0.00%  1.9420us         2     971ns     363ns  1.5790us  cuDeviceGetCount
-                    0.00%     981ns         2     490ns     288ns     693ns  cuDeviceGet
+ GPU activities:   56.19%  26.7934s       804  33.325ms  28.967ms  117.41ms  calc_fitness(void)
+                   42.62%  20.3230s       804  25.277ms  24.306ms  27.152ms  new_vel_pos(void)
+                    0.97%  460.99ms      1610  286.33us  45.504us  560.00us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
+                    0.21%  101.80ms         1  101.80ms  101.80ms  101.80ms  init_particle(void)
+                    0.01%  4.8519ms      2415  2.0090us     960ns  4.8320us  [CUDA memcpy DtoH]
+                    0.00%  12.480us        10  1.2480us  1.2160us  1.3760us  [CUDA memcpy HtoD]
+      API calls:   97.72%  47.1407s      2412  19.544ms  2.8050us  117.42ms  cudaEventSynchronize
+                    1.41%  679.41ms      1610  421.99us  5.7510us  102.39ms  cudaFree
+                    0.57%  273.71ms      1618  169.17us  4.8710us  80.146ms  cudaMalloc
+                    0.18%  85.152ms      2415  35.259us  10.815us  92.926us  cudaMemcpy
+                    0.08%  38.761ms      3220  12.037us  6.3360us  37.729us  cudaLaunchKernel
+                    0.02%  11.786ms      4826  2.4420us  1.3230us  334.56us  cudaEventRecord
+                    0.01%  5.9239ms      4826  1.2270us     448ns  53.408us  cudaEventCreate
+                    0.01%  3.5944ms      2412  1.4900us     953ns  5.6590us  cudaEventElapsedTime
+                    0.00%  815.60us      3220     253ns     137ns  1.0100us  cudaGetSymbolAddress
+                    0.00%  711.43us        96  7.4100us     214ns  316.18us  cuDeviceGetAttribute
+                    0.00%  105.78us         1  105.78us  105.78us  105.78us  cuDeviceTotalMem
+                    0.00%  94.531us        10  9.4530us  8.7000us  13.538us  cudaMemcpyToSymbol
+                    0.00%  89.056us         1  89.056us  89.056us  89.056us  cuDeviceGetName
+                    0.00%  3.5250us         1  3.5250us  3.5250us  3.5250us  cuDeviceGetPCIBusId
+                    0.00%  1.7780us         2     889ns     381ns  1.3970us  cuDeviceGetCount
+                    0.00%     808ns         2     404ns     235ns     573ns  cuDeviceGet
 ```
 
 ##### main_v6.cu
 ```
-==6004== Profiling result:
+==6232== Profiling result:
             Type  Time(%)      Time     Calls       Avg       Min       Max  Name
- GPU activities:   45.70%  223.56ms       758  294.94us  45.536us  570.30us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
-                   29.57%  144.63ms       378  382.61us  373.50us  426.01us  new_vel_pos(void)
-                   21.88%  107.02ms         1  107.02ms  107.02ms  107.02ms  init_particle(void)
-                    2.38%  11.626ms       378  30.757us  29.247us  39.552us  calc_fitness(void)
-                    0.47%  2.3179ms      1137  2.0380us     832ns  8.8000us  [CUDA memcpy DtoH]
-                    0.00%  12.320us        10  1.2320us  1.2160us  1.3440us  [CUDA memcpy HtoD]
-      API calls:   47.57%  383.10ms       758  505.41us  5.4680us  107.60ms  cudaFree
-                   23.13%  186.25ms      1134  164.24us  2.3950us  1.1824ms  cudaEventSynchronize
-                   21.22%  170.93ms       766  223.14us  4.7400us  86.237ms  cudaMalloc
-                    5.11%  41.121ms      1137  36.166us  9.3790us  133.65us  cudaMemcpy
-                    1.60%  12.857ms      1515  8.4860us  4.7470us  25.532us  cudaLaunchKernel
-                    0.64%  5.1260ms      2268  2.2600us  1.0210us  12.340us  cudaEventRecord
-                    0.27%  2.1783ms      2268     960ns     436ns  37.921us  cudaEventCreate
-                    0.14%  1.1545ms      1134  1.0180us     811ns  11.353us  cudaEventElapsedTime
-                    0.14%  1.1244ms         1  1.1244ms  1.1244ms  1.1244ms  cuDeviceGetName
-                    0.12%  968.98us        96  10.093us     256ns  480.31us  cuDeviceGetAttribute
-                    0.04%  289.22us      1516     190ns     131ns     486ns  cudaGetSymbolAddress
-                    0.01%  111.26us         1  111.26us  111.26us  111.26us  cuDeviceTotalMem
-                    0.01%  95.482us        10  9.5480us  9.0840us  12.840us  cudaMemcpyToSymbol
-                    0.00%  2.4480us         1  2.4480us  2.4480us  2.4480us  cuDeviceGetPCIBusId
-                    0.00%  2.2330us         2  1.1160us     446ns  1.7870us  cuDeviceGetCount
-                    0.00%     973ns         2     486ns     327ns     646ns  cuDeviceGet
-
+ GPU activities:   54.53%  6.64677s       210  31.651ms  29.778ms  34.899ms  calc_fitness(void)
+                   43.58%  5.31190s       210  25.295ms  24.712ms  27.127ms  new_vel_pos(void)
+                    1.04%  126.26ms       422  299.18us  45.569us  558.56us  find_min_fitness_parallel(fitness_pos const *, fitness_pos*, int, int, int)
+                    0.85%  103.26ms         1  103.26ms  103.26ms  103.26ms  init_particle(void)
+                    0.01%  1.2420ms       633  1.9620us  1.0560us  2.5920us  [CUDA memcpy DtoH]
+                    0.00%  12.320us        10  1.2320us  1.2160us  1.3760us  [CUDA memcpy HtoD]
+      API calls:   95.19%  11.9664s       630  18.994ms  3.6570us  34.907ms  cudaEventSynchronize
+                    2.43%  305.57ms       430  710.64us  4.8410us  254.14ms  cudaMalloc
+                    2.07%  260.24ms       422  616.67us  6.0020us  103.85ms  cudaFree
+                    0.18%  22.279ms       633  35.195us  11.302us  84.775us  cudaMemcpy
+                    0.08%  9.7308ms       844  11.529us  5.8510us  39.675us  cudaLaunchKernel
+                    0.02%  3.0101ms      1262  2.3850us  1.2600us  13.644us  cudaEventRecord
+                    0.01%  1.4871ms      1262  1.1780us     473ns  11.131us  cudaEventCreate
+                    0.01%  1.0146ms       630  1.6100us     975ns  7.5010us  cudaEventElapsedTime
+                    0.00%  507.97us        96  5.2910us     252ns  222.58us  cuDeviceGetAttribute
+                    0.00%  253.85us       844     300ns     136ns  5.2540us  cudaGetSymbolAddress
+                    0.00%  109.19us         1  109.19us  109.19us  109.19us  cuDeviceTotalMem
+                    0.00%  106.82us         1  106.82us  106.82us  106.82us  cuDeviceGetName
+                    0.00%  94.742us        10  9.4740us  8.5880us  13.174us  cudaMemcpyToSymbol
+                    0.00%  2.5040us         1  2.5040us  2.5040us  2.5040us  cuDeviceGetPCIBusId
+                    0.00%  2.2600us         2  1.1300us     415ns  1.8450us  cuDeviceGetCount
+                    0.00%     944ns         2     472ns     278ns     666ns  cuDeviceGet
 
 ```
